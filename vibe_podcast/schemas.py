@@ -15,6 +15,12 @@ from vibe_podcast.scriptwriter import (
 )
 
 
+class LoginRequest(BaseModel):
+    """Payload to exchange a session token for an HttpOnly session cookie."""
+
+    token: str = Field(..., min_length=1, max_length=512)
+
+
 class GenerateRequest(BaseModel):
     """Payload to generate a new dual-host podcast episode."""
 
@@ -24,10 +30,10 @@ class GenerateRequest(BaseModel):
     host_a: str = Field(default=DEFAULT_HOST_A, max_length=60)
     host_b: str = Field(default=DEFAULT_HOST_B, max_length=60)
     guest_name: Optional[str] = Field(default=None, max_length=60)
-    interview_format: str = DEFAULT_INTERVIEW_FORMAT
-    focus_questions: Optional[List[str]] = None
-    language: str = "zh-TW"
-    ui_lang: str = "zh-TW"
+    interview_format: str = Field(default=DEFAULT_INTERVIEW_FORMAT, max_length=80)
+    focus_questions: Optional[List[str]] = Field(default=None, max_length=10)
+    language: str = Field(default="zh-TW", max_length=16)
+    ui_lang: str = Field(default="zh-TW", max_length=16)
     target_turns: int = Field(default=12, ge=4, le=40)
     engine: Literal["auto", "edge_dialogue", "vibevoice_remote"] = "auto"
     backend: Literal["auto", "agy", "ollama"] = "auto"

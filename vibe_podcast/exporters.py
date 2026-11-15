@@ -16,8 +16,20 @@ def _safe_seconds(seconds: float) -> float:
     return seconds if isinstance(seconds, (int, float)) and math.isfinite(seconds) else 0.0
 
 
+_XML_ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _strip_xml_illegal(value: str) -> str:
+    """Remove ASCII control characters forbidden in XML 1.0 documents."""
+    return _XML_ILLEGAL_CTRL_RE.sub("", value or "")
+
+
+def _xml_text(value: str) -> str:
+    return xml_escape(_strip_xml_illegal(value))
+
+
 def _xml_attr(value: str) -> str:
-    return xml_escape(value, {'"': "&quot;", "'": "&apos;"})
+    return xml_escape(_strip_xml_illegal(value), {'"': "&quot;", "'": "&apos;"})
 
 
 def _format_srt_timestamp(seconds: float) -> str:
@@ -105,9 +117,9 @@ def episodes_to_rss_xml(
         dur_int = max(1, int(round(_safe_seconds(ep.duration_sec))))
         items_xml.append(
             f"""    <item>
-      <title>{xml_escape(ep.title)}</title>
-      <description>{xml_escape(ep.summary)}</description>
-      <guid isPermaLink="false">{xml_escape(ep.episode_id)}</guid>
+      <title>{_xml_text(ep.title)}</title>
+      <description>{_xml_text(ep.summary)}</description>
+      <guid isPermaLink="false">{_xml_text(ep.episode_id)}</guid>
       <enclosure url="{audio_url}" type="audio/mpeg" length="0"/>
       <itunes:duration>{dur_int}</itunes:duration>
     </item>"""
@@ -118,7 +130,7 @@ def episodes_to_rss_xml(
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
   <channel>
     <title>老馬麵攤 — VibePodcast Studio</title>
-    <link>{xml_escape(clean_base)}</link>
+    <link>{_xml_text(clean_base)}</link>
     <description>AI 雙人／多人技術 Podcast 工作室</description>
     <language>zh-tw</language>
 {items_block}

@@ -37,8 +37,23 @@ class PreflightReport(BaseModel):
     checks: List[CheckItem]
 
 
-def _probe_http_ok(url: str, timeout: float = 1.5) -> bool:
+def _probe_http_ok(url: str, timeout: float = 1.5, *, enforce_public: bool = False) -> bool:
     try:
+        from urllib.parse import urlparse
+
+        parsed_basic = urlparse(url)
+        if parsed_basic.scheme.lower() not in {"http", "https"} or not parsed_basic.hostname:
+            return False
+        if enforce_public:
+            from vibe_podcast.connectors import _build_pinned_opener, _validate_and_resolve_url
+
+            parsed, pinned_ip = _validate_and_resolve_url(url)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            opener = _build_pinned_opener({(parsed.hostname.lower(), port): pinned_ip})
+            req = urllib.request.Request(url, method="GET")
+            with opener.open(req, timeout=timeout) as resp:
+                return 200 <= resp.status < 500
+
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return 200 <= resp.status < 500
@@ -138,7 +153,8 @@ def run_preflight(
 
     remote_url = (os.environ.get("VIBEVOICE_REMOTE_URL") or "").strip()
     if remote_url:
-        remote_ok = _probe_http_ok(remote_url) if probe_network else True
+        enforce_public_remote = os.environ.get("VIBEPODCAST_ALLOW_PRIVATE_REMOTE") != "1"
+        remote_ok = _probe_http_ok(remote_url, enforce_public=enforce_public_remote) if probe_network else True
         checks.append(
             CheckItem(
                 name="vibevoice_remote",

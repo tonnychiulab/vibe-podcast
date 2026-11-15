@@ -11,14 +11,16 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from vibe_podcast import __version__
-from vibe_podcast.auth import get_auth_role
+from vibe_podcast.auth import get_auth_role, match_token_role, set_session_cookie
 from vibe_podcast.connectors import SourceItem
 from vibe_podcast.guardrails import (
     ContentSafetyError,
@@ -33,6 +35,7 @@ from vibe_podcast.routes import get_server
 from vibe_podcast.schemas import (
     CustomPresetPayload,
     GenerateRequest,
+    LoginRequest,
     ScriptDraftResponse,
     SynthesizeScriptRequest,
     UploadSourceRequest,
@@ -60,6 +63,20 @@ def health(request: Request, probe_network: bool = False) -> dict:
         "ffmpeg_available": report.ffmpeg_available,
         "preflight": report.model_dump(),
     }
+
+
+@router.post("/api/login")
+def login_with_token(payload: LoginRequest, request: Request) -> JSONResponse:
+    """Authenticate with a session or listener token via POST JSON body without URL query exposure."""
+    srv = get_server()
+    token = payload.token.strip()
+    role = match_token_role(token, srv.SESSION_TOKEN, srv.LISTEN_TOKEN)
+    if role is None:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+    resp = JSONResponse({"ok": True, "role": role})
+    set_session_cookie(resp, token, request)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @router.get("/api/meta")
@@ -222,9 +239,10 @@ def upload_source_file(req: UploadSourceRequest) -> dict:
                 detail=_upload_msg(req.ui_lang, "檔案編碼無法解析，請使用 UTF-8 文字檔", "Unable to decode text file; please upload UTF-8."),
             )
     else:
-        try:
-            from pypdf import PdfReader
+        from pypdf import PdfReader
+        from pypdf.errors import LimitReachedError
 
+        try:
             reader = PdfReader(io.BytesIO(raw_bytes))
             chunks: List[str] = []
             total_chars = 0
@@ -237,6 +255,15 @@ def upload_source_file(req: UploadSourceRequest) -> dict:
                 if total_chars >= MAX_EXTRACTED_CHARS:
                     break
             extracted = "\n\n".join(chunks).strip()
+        except LimitReachedError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=_upload_msg(
+                    req.ui_lang,
+                    "PDF 結構過於複雜或超過安全限制，已拒絕解析",
+                    "PDF exceeds safe structural decompression limits and was rejected.",
+                ),
+            ) from exc
         except Exception as exc:
             logger.warning("pypdf extraction failed, falling back to pdftotext: %s", exc)
             extracted = ""
@@ -256,13 +283,37 @@ def upload_source_file(req: UploadSourceRequest) -> dict:
             try:
                 with os.fdopen(fd, "wb") as fh:
                     fh.write(raw_bytes)
-                proc = subprocess.run(
+                max_stdout_bytes = MAX_EXTRACTED_CHARS * 4
+                deadline = time.monotonic() + 30.0
+                proc = subprocess.Popen(
                     [pdftotext_bin, "-f", "1", "-l", str(MAX_PDF_PAGES), tmp_pdf, "-"],
-                    capture_output=True,
-                    timeout=30,
-                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
-                extracted = proc.stdout.decode("utf-8", errors="replace").strip()
+                buf = bytearray()
+                capped = False
+                try:
+                    assert proc.stdout is not None
+                    while len(buf) < max_stdout_bytes:
+                        if time.monotonic() > deadline:
+                            raise subprocess.TimeoutExpired(proc.args, 30)
+                        chunk = proc.stdout.read(min(16_384, max_stdout_bytes - len(buf)))
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                    if len(buf) >= max_stdout_bytes:
+                        capped = True
+                        proc.kill()
+                    remaining_wait = max(0.5, deadline - time.monotonic())
+                    proc.wait(timeout=remaining_wait)
+                    if not capped and proc.returncode != 0:
+                        raise subprocess.CalledProcessError(proc.returncode, proc.args)
+                    extracted = bytes(buf).decode("utf-8", errors="replace").strip()
+                except Exception:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait()
+                    raise
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 raise HTTPException(
                     status_code=422,
@@ -306,7 +357,9 @@ def _synthesize_from_request(srv, script, req, on_progress=None) -> SynthesisRes
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except RuntimeError as exc:
+    except (TimeoutError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -359,6 +412,10 @@ def generate_episode(req: GenerateRequest) -> SynthesisResult:
         srv._GENERATION_SEMAPHORE.release()
 
 
+class _StreamCancelled(Exception):
+    """Internal signal raised when an SSE client disconnects mid-generation."""
+
+
 @router.post("/api/generate/stream")
 async def generate_episode_stream(req: GenerateRequest) -> StreamingResponse:
     """Stream Server-Sent Events (SSE) progress while generating an episode."""
@@ -366,23 +423,37 @@ async def generate_episode_stream(req: GenerateRequest) -> StreamingResponse:
     srv._acquire_generation_slot(req.ui_lang)
     queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
+    cancel_event = threading.Event()
 
     def _emit(event: str, payload: dict) -> None:
+        if cancel_event.is_set() or loop.is_closed():
+            return
         line = f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-        loop.call_soon_threadsafe(queue.put_nowait, line)
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, line)
+        except RuntimeError:
+            pass
 
     def _worker() -> None:
         try:
             _emit("progress", {"stage": "fetching", "current": 0, "total": 1})
             source_text = srv._resolve_generate_source(req)
+            if cancel_event.is_set():
+                raise _StreamCancelled()
             _emit("progress", {"stage": "scripting", "current": 0, "total": 1})
             script = srv._draft_script_from_request(req, source_text)
+            if cancel_event.is_set():
+                raise _StreamCancelled()
 
             def _on_tts_progress(stage: str, current: int, total: int) -> None:
+                if cancel_event.is_set():
+                    raise _StreamCancelled()
                 _emit("progress", {"stage": stage, "current": current, "total": total})
 
             result = _synthesize_from_request(srv, script, req, on_progress=_on_tts_progress)
             _emit("done", result.model_dump())
+        except _StreamCancelled:
+            logger.info("SSE client disconnected; aborted remaining generation stages")
         except HTTPException as exc:
             _emit("error", {"detail": str(exc.detail)})
         except Exception:
@@ -399,10 +470,16 @@ async def generate_episode_stream(req: GenerateRequest) -> StreamingResponse:
             )
         finally:
             srv._GENERATION_SEMAPHORE.release()
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+            if not loop.is_closed():
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+                except RuntimeError:
+                    pass
+
+    # Start the worker immediately upon slot acquisition so pre-iteration disconnects still release it.
+    task = asyncio.create_task(asyncio.to_thread(_worker))
 
     async def _event_stream():
-        task = asyncio.create_task(asyncio.to_thread(_worker))
         try:
             while True:
                 item = await queue.get()
@@ -410,6 +487,8 @@ async def generate_episode_stream(req: GenerateRequest) -> StreamingResponse:
                     break
                 yield item
         finally:
-            await task
+            cancel_event.set()
+            if task.done():
+                await task
 
     return StreamingResponse(_event_stream(), media_type="text/event-stream")

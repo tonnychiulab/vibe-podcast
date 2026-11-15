@@ -9,6 +9,10 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import time
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -24,6 +28,21 @@ from vibe_podcast.audio_fx import (
 from vibe_podcast.scriptwriter import DialogueTurn, PodcastScript
 
 logger = logging.getLogger("vibe_podcast.synthesizer")
+
+MAX_REMOTE_AUDIO_BYTES = 100 * 1024 * 1024
+_EDGE_TURN_TIMEOUT_SEC = 45.0
+_EPISODE_LOCKS_GUARD = threading.Lock()
+_EPISODE_LOCKS: Dict[str, threading.Lock] = {}
+
+
+def episode_lock(episode_id: str) -> threading.Lock:
+    """Return a per-episode mutex protecting timeline edits and directory deletion."""
+    with _EPISODE_LOCKS_GUARD:
+        lock = _EPISODE_LOCKS.get(episode_id)
+        if lock is None:
+            lock = threading.Lock()
+            _EPISODE_LOCKS[episode_id] = lock
+        return lock
 
 DEFAULT_VOICES_ZH = {
     "Speaker 1": "zh-TW-YunJheNeural",
@@ -129,7 +148,7 @@ async def _edge_tts_to_file(
         for attempt in range(2):
             try:
                 communicate = edge_tts.Communicate(text, candidate, rate=rate, pitch=pitch)
-                await communicate.save(out_path)
+                await asyncio.wait_for(communicate.save(out_path), timeout=_EDGE_TURN_TIMEOUT_SEC)
                 return candidate
             except Exception as exc:
                 logger.warning("edge-tts failed with voice %s (try %d): %s", candidate, attempt + 1, exc)
@@ -191,7 +210,15 @@ def _finalize_synthesis(
         duration_sec=total_duration,
         segments=segments,
     )
-    timeline_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    payload = result.model_dump_json(indent=2)
+    fd, tmp_name = tempfile.mkstemp(dir=str(episode_dir), prefix=".timeline_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        os.replace(tmp_name, timeline_path)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
     return result
 
 
@@ -213,12 +240,15 @@ def _synthesize_edge_dialogue(
     voices = resolve_voice_map(voice_map, language=language)
     total_turns = len(script.turns)
     locked_voice: Dict[str, str] = dict(voices)
+    deadline = time.monotonic() + max(120.0, total_turns * _EDGE_TURN_TIMEOUT_SEC)
 
     async def _run_all() -> List[Path]:
         paths: List[Path] = [turns_dir / f"turn_{idx:03d}.mp3" for idx in range(total_turns)]
         used_voices: Dict[int, str] = {}
 
         for idx, turn in enumerate(script.turns):
+            if time.monotonic() > deadline:
+                raise TimeoutError("Edge-TTS synthesis deadline exceeded")
             if on_progress:
                 on_progress("synthesizing", idx + 1, total_turns)
             out_file = paths[idx]
@@ -284,6 +314,23 @@ def resynthesize_turn(
     new_cue: Optional[str] = None,
 ) -> SynthesisResult:
     """Re-synthesize a single dialogue turn in-place and re-merge episode audio."""
+    with episode_lock(episode_id):
+        return _resynthesize_turn_unlocked(
+            episode_dir=episode_dir,
+            episode_id=episode_id,
+            turn_index=turn_index,
+            new_text=new_text,
+            new_cue=new_cue,
+        )
+
+
+def _resynthesize_turn_unlocked(
+    episode_dir: Path,
+    episode_id: str,
+    turn_index: int,
+    new_text: str,
+    new_cue: Optional[str] = None,
+) -> SynthesisResult:
     from vibe_podcast.guardrails import _apply_soft_replacements, check_text_safety
 
     timeline_path = episode_dir / "timeline.json"
@@ -402,6 +449,13 @@ def _estimate_timeline_by_char_length(
     return segments
 
 
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject HTTP redirects when calling explicitly private remote TTS endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise PermissionError("Remote TTS endpoint redirects are not allowed")
+
+
 def _synthesize_vibevoice_remote(
     script: PodcastScript,
     episode_dir: Path,
@@ -409,6 +463,25 @@ def _synthesize_vibevoice_remote(
     remote_url: str,
 ) -> SynthesisResult:
     """Send formatted multi-speaker script to a remote VibeVoice GPU server."""
+    from vibe_podcast.connectors import (
+        _build_pinned_opener,
+        _read_bounded_stream,
+        _validate_and_resolve_url,
+    )
+
+    allow_private = os.environ.get("VIBEPODCAST_ALLOW_PRIVATE_REMOTE") == "1"
+    target_url = f"{remote_url.rstrip('/')}/synthesize"
+    parsed_basic = urllib.parse.urlparse(target_url)
+    if parsed_basic.scheme.lower() not in {"http", "https"} or not parsed_basic.hostname:
+        raise ValueError("Invalid VIBEVOICE_REMOTE_URL")
+
+    if allow_private:
+        opener = urllib.request.build_opener(_RejectRedirectHandler())
+    else:
+        parsed, pinned_ip = _validate_and_resolve_url(target_url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        opener = _build_pinned_opener({(parsed.hostname.lower(), port): pinned_ip})
+
     speakers = [s for s in (script.host_a, script.host_b, script.guest_name) if s]
     payload = json.dumps(
         {
@@ -417,14 +490,33 @@ def _synthesize_vibevoice_remote(
         }
     ).encode("utf-8")
     req = urllib.request.Request(
-        f"{remote_url.rstrip('/')}/synthesize",
+        target_url,
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     final_audio = episode_dir / "podcast.wav"
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        final_audio.write_bytes(resp.read())
+    deadline = time.monotonic() + 300.0
+    with opener.open(req, timeout=300) as resp:
+        headers = getattr(resp, "headers", None)
+        ctype = ((headers.get("Content-Type") if headers else None) or "").split(";", 1)[0].strip().lower()
+        if ctype and not ctype.startswith(("audio/", "application/octet-stream")):
+            raise ValueError(f"Unsupported remote TTS Content-Type: {ctype}")
+        audio_bytes = _read_bounded_stream(
+            resp,
+            max_bytes=MAX_REMOTE_AUDIO_BYTES,
+            deadline=deadline,
+            exceeded_error="Remote TTS response exceeded maximum allowed audio size",
+        )
+
+    fd, tmp_audio = tempfile.mkstemp(dir=str(episode_dir), prefix=".podcast_", suffix=".wav.tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(audio_bytes)
+        os.replace(tmp_audio, final_audio)
+    except Exception:
+        Path(tmp_audio).unlink(missing_ok=True)
+        raise
 
     total_duration = probe_duration_sec(str(final_audio))
     segments = _estimate_timeline_by_char_length(script, total_duration)

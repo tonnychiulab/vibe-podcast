@@ -61,7 +61,7 @@ async def _lifespan(_app: FastAPI):
     public_url = os.environ.get("VIBEPODCAST_PUBLIC_URL", "").strip().rstrip("/")
     token_file = get_token_file_path()
     listen_file = get_listen_token_file_path()
-    logger.info("VibePodcast Auth URL: http://127.0.0.1:%s/?token=%s", port, SESSION_TOKEN)
+    logger.info("VibePodcast Studio listening on http://127.0.0.1:%s/ (token stored at %s)", port, token_file)
     public_lines = (
         f"🌐 Public Admin URL: {public_url}/?token={SESSION_TOKEN}\n"
         f"🎧 Public Listen-Only URL: {public_url}/?token={LISTEN_TOKEN}\n"
@@ -109,6 +109,8 @@ def _make_episode_id(title: str) -> str:
 def _resolve_report_path(report_path: str, lang: str = DEFAULT_LOCALE) -> str:
     try:
         return connector_registry.load_text(report_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=get_error_message("forbidden_report", lang)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=get_error_message("forbidden_report", lang)) from exc
     except FileNotFoundError as exc:

@@ -79,7 +79,7 @@ let selectAbortController = null;
 
 function applyMeta(meta) {
   state.appMeta = meta;
-  state.userRole = meta.role || "admin";
+  state.userRole = meta.role || null;
   const isAdmin = state.userRole === "admin";
   if (btnModeStudio) btnModeStudio.hidden = !isAdmin;
   if (btnOpenPrefs) btnOpenPrefs.hidden = !isAdmin;
@@ -231,12 +231,24 @@ async function loadMeta(lang) {
     const res = await fetch(`/api/meta?lang=${encodeURIComponent(lang)}`);
     if (res.status === 401) {
       const entered = window.prompt(
-        "🔐 請輸入終端機啟動時顯示的 VibePodcast Session Token（或直接開啟終端機印出的 Auth URL）："
+        "🔐 請輸入 VibePodcast Session Token（或使用專屬登入連結）："
       );
       if (entered && entered.trim()) {
-        window.location.href = `/?token=${encodeURIComponent(entered.trim())}`;
+        const loginRes = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: entered.trim() }),
+        });
+        if (loginRes.ok) {
+          const retry = await fetch(`/api/meta?lang=${encodeURIComponent(lang)}`);
+          if (retry.ok) {
+            applyMeta(await retry.json());
+            return true;
+          }
+        }
+        genStatus.textContent = "🔐 Token 驗證失敗，請確認是否輸入正確。";
       } else {
-        genStatus.textContent = "🔐 未通過認證，請開啟終端機顯示的 Auth URL。";
+        genStatus.textContent = "🔐 未通過認證，請先登入後再操作。";
       }
       return false;
     }
@@ -406,8 +418,10 @@ async function loadEpisodes(selectId = null) {
         : episodes[0].episode_id;
     await selectEpisode(targetId);
   }
-  if (!localStorage.getItem("vp_ui_mode")) {
+  if (state.userRole === "admin" && !localStorage.getItem("vp_ui_mode")) {
     setWorkspaceMode(episodes.length > 0 ? "listen" : "studio", false);
+  } else if (state.userRole !== "admin") {
+    setWorkspaceMode("listen", false);
   }
 }
 

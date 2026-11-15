@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 from typing import List
 
@@ -23,7 +24,7 @@ from vibe_podcast.guardrails import ContentSafetyError
 from vibe_podcast.i18n import DEFAULT_LOCALE, get_error_message
 from vibe_podcast.routes import get_server
 from vibe_podcast.schemas import EpisodeSummary, ResynthesizeTurnRequest
-from vibe_podcast.synthesizer import SynthesisResult, resynthesize_turn
+from vibe_podcast.synthesizer import SynthesisResult, episode_lock, resynthesize_turn
 
 logger = logging.getLogger("vibe_podcast.routes.episodes")
 
@@ -170,6 +171,10 @@ def update_episode_turn(
             ) from exc
         except IndexError as exc:
             raise HTTPException(status_code=404, detail="Turn index out of range") from exc
+        except (TimeoutError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(status_code=504, detail="Turn re-synthesis timed out") from exc
+        except (subprocess.CalledProcessError, RuntimeError) as exc:
+            raise HTTPException(status_code=502, detail="Turn re-synthesis failed") from exc
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -179,8 +184,9 @@ def update_episode_turn(
 @router.delete("/api/episodes/{episode_id}")
 def delete_episode(episode_id: str, lang: str = DEFAULT_LOCALE) -> dict:
     """Delete a synthesized podcast episode directory."""
-    ep_dir = _resolve_episode_dir(episode_id, lang)
-    shutil.rmtree(ep_dir)
+    with episode_lock(episode_id):
+        ep_dir = _resolve_episode_dir(episode_id, lang)
+        shutil.rmtree(ep_dir)
     return {"deleted": episode_id}
 
 

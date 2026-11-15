@@ -86,11 +86,34 @@ def _match_token_role(
 ) -> Optional[AuthRole]:
     if not candidate:
         return None
-    if hmac.compare_digest(candidate, admin_token):
+    candidate_bytes = candidate.encode("utf-8")
+    if hmac.compare_digest(candidate_bytes, admin_token.encode("utf-8")):
         return "admin"
-    if listen_token and hmac.compare_digest(candidate, listen_token):
+    if listen_token and hmac.compare_digest(candidate_bytes, listen_token.encode("utf-8")):
         return "listener"
     return None
+
+
+def match_token_role(
+    candidate: str,
+    admin_token: str,
+    listen_token: Optional[str] = None,
+) -> Optional[AuthRole]:
+    """Validate a candidate token string against admin and optional listener tokens."""
+    return _match_token_role(candidate, admin_token, listen_token)
+
+
+def set_session_cookie(response, token: str, request: Request) -> None:
+    """Attach the HttpOnly session cookie with attributes matched to transport security."""
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=_is_https_request(request),
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+        path="/",
+    )
 
 
 def get_auth_role(
@@ -145,7 +168,8 @@ def apply_security_headers(response) -> None:
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'"
+        "img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; "
+        "frame-ancestors 'none'"
     )
 
 
@@ -159,20 +183,19 @@ async def handle_security_and_auth(
     path = request.url.path
     if request.method == "GET" and path == "/" and "token" in request.query_params:
         supplied = request.query_params.get("token", "")
-        if _match_token_role(supplied, expected_token, listen_token) is not None:
+        supplied_role = _match_token_role(supplied, expected_token, listen_token)
+        if supplied_role is not None:
             resp = RedirectResponse(url="/", status_code=302)
-            resp.set_cookie(
-                key=SESSION_COOKIE_NAME,
-                value=supplied,
-                httponly=True,
-                secure=_is_https_request(request),
-                samesite="lax",
-                max_age=60 * 60 * 24 * 30,
-                path="/",
-            )
+            existing_cookie = request.cookies.get(SESSION_COOKIE_NAME, "").strip()
+            existing_role = _match_token_role(existing_cookie, expected_token, listen_token)
+            # Prevent Login CSRF downgrade from an active admin session to a listener session.
+            if not (existing_role == "admin" and supplied_role == "listener"):
+                set_session_cookie(resp, supplied, request)
+            resp.headers["Cache-Control"] = "no-store"
             apply_security_headers(resp)
             return resp
         resp = JSONResponse({"detail": "Invalid session token"}, status_code=401)
+        resp.headers["Cache-Control"] = "no-store"
         apply_security_headers(resp)
         return resp
 
@@ -186,13 +209,15 @@ async def handle_security_and_auth(
             allow_query_admin=False,
         )
         request.state.auth_role = role
-        if path != "/api/health":
+        if path not in {"/api/health", "/api/login"}:
             if role is None:
                 resp = JSONResponse({"detail": "Authentication required"}, status_code=401)
+                resp.headers["Cache-Control"] = "no-store"
                 apply_security_headers(resp)
                 return resp
             if role != "admin" and not _is_listener_allowed_api(request.method, path):
                 resp = JSONResponse({"detail": "Admin permission required"}, status_code=403)
+                resp.headers["Cache-Control"] = "no-store"
                 apply_security_headers(resp)
                 return resp
 
@@ -200,6 +225,7 @@ async def handle_security_and_auth(
     if (
         path in {"/", "/index.html", "/app.js", "/style.css", "/feed.xml"}
         or path.startswith("/js/")
+        or path.startswith("/css/")
         or path.startswith("/api/")
     ):
         response.headers["Cache-Control"] = "no-store"

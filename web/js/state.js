@@ -1,7 +1,7 @@
 export const state = {
   currentEpisode: null,
   appMeta: null,
-  userRole: "admin",
+  userRole: null,
   reportCount: 0,
   currentUiLang: localStorage.getItem("laoma_ui_lang") || "zh-TW",
 };

@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger("vibe_podcast.show_memory")
 
@@ -44,6 +44,11 @@ class ShowBible(BaseModel):
         max_length=20,
     )
 
+    @field_validator("recurring_callbacks", "banned_cliches")
+    @classmethod
+    def _bound_string_items(cls, items: List[str]) -> List[str]:
+        return [item.strip()[:120] for item in items if item and item.strip()]
+
 
 class EpisodeMemoryItem(BaseModel):
     """Compact summary of a past episode used for cross-episode continuity."""
@@ -56,16 +61,34 @@ class EpisodeMemoryItem(BaseModel):
     takeaway: str = ""
 
 
+_MAX_MEMORY_JSON_BYTES = 512 * 1024
+
+
+def _is_safe_regular_file(path: Path, base_dir: Path) -> bool:
+    """Return True if path is a non-symlink regular file under base_dir within size limits."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        resolved_base = base_dir.resolve()
+        resolved_target = path.resolve()
+        if not resolved_target.is_relative_to(resolved_base):
+            return False
+        return resolved_target.stat().st_size <= _MAX_MEMORY_JSON_BYTES
+    except OSError:
+        return False
+
+
 def _sanitize_memory_text(value: str, limit: int = 220) -> str:
-    """Strip tag-like sequences and collapse whitespace for safe prompt injection."""
-    cleaned = re.sub(r"<[^>]*>", "", value or "")
+    """Strip control/tag-like sequences and collapse whitespace for safe prompt injection."""
+    no_ctrl = re.sub(r"[\x00-\x1f\x7f]+", " ", value or "")
+    cleaned = re.sub(r"<[^>]*>", "", no_ctrl)
     return " ".join(cleaned.splitlines()).strip()[:limit]
 
 
 def load_show_bible(episodes_dir: Path) -> ShowBible:
     """Load `episodes_dir/show_bible.json` if present, otherwise return defaults."""
     bible_path = episodes_dir / "show_bible.json"
-    if not bible_path.is_file():
+    if not _is_safe_regular_file(bible_path, episodes_dir):
         return ShowBible()
     try:
         data = json.loads(bible_path.read_text(encoding="utf-8"))
@@ -102,13 +125,13 @@ def load_recent_episodes_memory(
     items: List[EpisodeMemoryItem] = []
     # Episode directory names begin with YYYYMMDD-HHMMSS, so reverse sort yields newest first.
     candidates = sorted(
-        (p for p in episodes_dir.iterdir() if p.is_dir()),
+        (p for p in episodes_dir.iterdir() if p.is_dir() and not p.is_symlink()),
         key=lambda p: p.name,
         reverse=True,
     )
     for ep_dir in candidates:
         timeline_path = ep_dir / "timeline.json"
-        if not timeline_path.is_file():
+        if not _is_safe_regular_file(timeline_path, episodes_dir):
             continue
         try:
             payload = json.loads(timeline_path.read_text(encoding="utf-8"))
@@ -143,7 +166,8 @@ def load_recent_episodes_memory(
                 title=title,
                 summary=summary,
                 guest_name=_sanitize_memory_text(str(payload.get("guest_name") or ""), 60) or None,
-                interview_format=str(payload.get("interview_format") or "noodle_chat"),
+                interview_format=_sanitize_memory_text(str(payload.get("interview_format") or "noodle_chat"), 60)
+                or "noodle_chat",
                 takeaway=" / ".join(takeaway_texts[:2]),
             )
         )

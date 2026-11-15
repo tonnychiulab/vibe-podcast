@@ -117,6 +117,8 @@ class MarkdownDirConnector:
             raise PermissionError("Path is outside allowed reports directory")
         if not candidate.is_file():
             raise FileNotFoundError(f"Source file not found: {candidate}")
+        if candidate.stat().st_size > 2 * 1024 * 1024:
+            raise PermissionError("Report file exceeds maximum allowed size")
         return candidate.read_text(encoding="utf-8").strip()
 
 
@@ -304,6 +306,39 @@ _ALLOWED_CONTENT_TYPES = (
 )
 
 
+def _read_bounded_stream(
+    resp,
+    max_bytes: int,
+    deadline: Optional[float] = None,
+    *,
+    exceeded_error: Optional[str] = None,
+) -> bytes:
+    """Read an HTTP response stream in chunks while enforcing size and deadline limits."""
+    chunks: List[bytes] = []
+    total = 0
+    chunk_size = 16_384
+    while True:
+        if deadline is not None and time.monotonic() > deadline:
+            raise TimeoutError("External fetch deadline exceeded")
+        remaining = max_bytes - total
+        to_read = min(chunk_size, remaining) if exceeded_error is None else min(chunk_size, remaining + 1)
+        if to_read <= 0:
+            break
+        part = resp.read(to_read)
+        if not part:
+            break
+        total += len(part)
+        if total > max_bytes:
+            if exceeded_error is not None:
+                raise ValueError(exceeded_error)
+            chunks.append(part[: max_bytes - (total - len(part))])
+            break
+        chunks.append(part)
+        if exceeded_error is None and total >= max_bytes:
+            break
+    return b"".join(chunks)
+
+
 def _http_get_bytes(
     url: str,
     timeout: int = 12,
@@ -311,11 +346,11 @@ def _http_get_bytes(
     deadline: Optional[float] = None,
 ) -> bytes:
     effective_timeout = float(timeout)
-    if deadline is not None:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("External fetch deadline exceeded")
-        effective_timeout = min(effective_timeout, max(1.0, remaining))
+    read_deadline = deadline if deadline is not None else (time.monotonic() + effective_timeout)
+    remaining = read_deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("External fetch deadline exceeded")
+    effective_timeout = min(effective_timeout, max(1.0, remaining))
 
     parsed, pinned_ip = _validate_and_resolve_url(url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -329,7 +364,7 @@ def _http_get_bytes(
         ctype = ((headers.get("Content-Type") if headers else None) or "").split(";", 1)[0].strip().lower()
         if ctype and not ctype.startswith(_ALLOWED_CONTENT_TYPES):
             raise ValueError(f"不支援的網頁內容格式：{ctype}")
-        return resp.read(max_bytes)
+        return _read_bounded_stream(resp, max_bytes=max_bytes, deadline=read_deadline)
 
 
 def _decode_http_bytes(raw_bytes: bytes) -> str:
