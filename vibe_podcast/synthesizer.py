@@ -15,6 +15,7 @@ import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Literal, Optional, TypeVar, cast
 
@@ -32,17 +33,49 @@ logger = logging.getLogger("vibe_podcast.synthesizer")
 MAX_REMOTE_AUDIO_BYTES = 100 * 1024 * 1024
 _EDGE_TURN_TIMEOUT_SEC = 45.0
 _EPISODE_LOCKS_GUARD = threading.Lock()
-_EPISODE_LOCKS: Dict[str, threading.Lock] = {}
+_EPISODE_LOCKS: Dict[str, List[Any]] = {}
 
 
-def episode_lock(episode_id: str) -> threading.Lock:
-    """Return a per-episode mutex protecting timeline edits and directory deletion."""
+@contextmanager
+def episode_lock(episode_id: str):
+    """Serialize edits and deletion per episode using a reference-counted RLock."""
     with _EPISODE_LOCKS_GUARD:
-        lock = _EPISODE_LOCKS.get(episode_id)
-        if lock is None:
-            lock = threading.Lock()
-            _EPISODE_LOCKS[episode_id] = lock
-        return lock
+        entry = _EPISODE_LOCKS.get(episode_id)
+        if entry is None:
+            entry = [threading.RLock(), 0]
+            _EPISODE_LOCKS[episode_id] = entry
+        entry[1] += 1
+        lock = cast(threading.RLock, entry[0])
+    try:
+        with lock:
+            yield lock
+    finally:
+        with _EPISODE_LOCKS_GUARD:
+            entry[1] -= 1
+            if entry[1] <= 0 and _EPISODE_LOCKS.get(episode_id) is entry:
+                _EPISODE_LOCKS.pop(episode_id, None)
+
+
+def _stage_temp_text(directory: Path, prefix: str, suffix: str, content: str) -> Path:
+    """Write UTF-8 text into a uniquely named temp file inside the target directory."""
+    fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=prefix, suffix=suffix)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+    return Path(tmp_name)
+
+
+def _atomic_write_text(target: Path, content: str, *, prefix: str = ".tmp_") -> None:
+    """Atomically write UTF-8 text via staging temp file and os.replace."""
+    tmp_path = _stage_temp_text(target.parent, prefix, ".tmp", content)
+    try:
+        os.replace(tmp_path, target)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 DEFAULT_VOICES_ZH = {
     "Speaker 1": "zh-TW-YunJheNeural",
@@ -211,14 +244,7 @@ def _finalize_synthesis(
         segments=segments,
     )
     payload = result.model_dump_json(indent=2)
-    fd, tmp_name = tempfile.mkstemp(dir=str(episode_dir), prefix=".timeline_", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(payload)
-        os.replace(tmp_name, timeline_path)
-    except Exception:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+    _atomic_write_text(timeline_path, payload, prefix=".timeline_")
     return result
 
 
@@ -363,18 +389,7 @@ def _resynthesize_turn_unlocked(
     rate, pitch = _cue_to_prosody(effective_cue)
     fb = FALLBACK_VOICES_ZH.get(seg.speaker, []) if existing.language.startswith("zh") else []
 
-    async def _regen() -> str:
-        return await _edge_tts_to_file(
-            cleaned_text,
-            voice,
-            str(turn_files[turn_index]),
-            rate=rate,
-            pitch=pitch,
-            fallback_voices=fb,
-        )
-
-    _run_async(_regen)
-
+    # Validate updated turn and full PodcastScript schema before mutating any on-disk audio.
     turns: List[DialogueTurn] = []
     for idx, s in enumerate(existing.segments):
         turns.append(
@@ -396,30 +411,87 @@ def _resynthesize_turn_unlocked(
         interview_format=existing.interview_format,
         turns=turns,
     )
-    (episode_dir / "vibevoice_script.txt").write_text(
-        script.to_vibevoice_text(), encoding="utf-8"
-    )
 
-    final_audio, new_segments = _merge_turns_to_mp3(
-        turns=turns,
-        turn_files=turn_files,
-        episode_dir=episode_dir,
-        turns_dir=turns_dir,
-        enable_loudnorm=existing.enable_loudnorm,
-        enable_sfx=existing.enable_sfx,
+    fd_turn, tmp_turn_str = tempfile.mkstemp(
+        dir=str(turns_dir), prefix=f".turn_{turn_index:03d}_", suffix=".tmp.mp3"
     )
-    return _finalize_synthesis(
-        script=script,
-        episode_dir=episode_dir,
-        episode_id=episode_id,
-        engine=existing.engine,
-        final_audio=final_audio,
-        segments=new_segments,
-        language=existing.language,
-        voice_map=voices,
-        enable_loudnorm=existing.enable_loudnorm,
-        enable_sfx=existing.enable_sfx,
+    os.close(fd_turn)
+    tmp_turn = Path(tmp_turn_str)
+
+    fd_merged, tmp_merged_str = tempfile.mkstemp(
+        dir=str(episode_dir), prefix=".podcast_regen_", suffix=".tmp.mp3"
     )
+    os.close(fd_merged)
+    tmp_merged = Path(tmp_merged_str)
+
+    tmp_txt: Optional[Path] = None
+    tmp_timeline: Optional[Path] = None
+    final_audio = episode_dir / "podcast.mp3"
+    timeline_path = episode_dir / "timeline.json"
+
+    try:
+        async def _regen() -> str:
+            return await _edge_tts_to_file(
+                cleaned_text,
+                voice,
+                str(tmp_turn),
+                rate=rate,
+                pitch=pitch,
+                fallback_voices=fb,
+            )
+
+        _run_async(_regen)
+
+        effective_turn_files = [
+            tmp_turn if idx == turn_index else p for idx, p in enumerate(turn_files)
+        ]
+        _, new_segments = _merge_turns_to_mp3(
+            turns=turns,
+            turn_files=effective_turn_files,
+            episode_dir=episode_dir,
+            turns_dir=turns_dir,
+            enable_loudnorm=existing.enable_loudnorm,
+            enable_sfx=existing.enable_sfx,
+            output_path=tmp_merged,
+        )
+        total_duration = probe_duration_sec(str(tmp_merged))
+        result = SynthesisResult(
+            episode_id=episode_id,
+            title=script.title,
+            summary=script.summary,
+            host_a=script.host_a,
+            host_b=script.host_b,
+            guest_name=script.guest_name,
+            interview_format=script.interview_format,
+            engine=existing.engine,
+            language=existing.language,
+            voice_map=voices,
+            enable_loudnorm=existing.enable_loudnorm,
+            enable_sfx=existing.enable_sfx,
+            audio_path=str(final_audio),
+            timeline_path=str(timeline_path),
+            duration_sec=total_duration,
+            segments=new_segments,
+        )
+        tmp_txt = _stage_temp_text(episode_dir, ".script_", ".tmp", script.to_vibevoice_text())
+        tmp_timeline = _stage_temp_text(
+            episode_dir, ".timeline_", ".tmp", result.model_dump_json(indent=2)
+        )
+
+        # Stage and validate everything above before swapping any persistent artifacts.
+        os.replace(tmp_merged, final_audio)
+        os.replace(tmp_turn, turn_files[turn_index])
+        os.replace(tmp_txt, episode_dir / "vibevoice_script.txt")
+        os.replace(tmp_timeline, timeline_path)
+        return result
+    except Exception:
+        tmp_turn.unlink(missing_ok=True)
+        tmp_merged.unlink(missing_ok=True)
+        if tmp_txt is not None:
+            tmp_txt.unlink(missing_ok=True)
+        if tmp_timeline is not None:
+            tmp_timeline.unlink(missing_ok=True)
+        raise
 
 
 def _estimate_timeline_by_char_length(
@@ -464,9 +536,9 @@ def _synthesize_vibevoice_remote(
 ) -> SynthesisResult:
     """Send formatted multi-speaker script to a remote VibeVoice GPU server."""
     from vibe_podcast.connectors import (
-        _build_pinned_opener,
+        _open_pinned_opener,
         _read_bounded_stream,
-        _validate_and_resolve_url,
+        _resolve_pinned_candidates,
     )
 
     allow_private = os.environ.get("VIBEPODCAST_ALLOW_PRIVATE_REMOTE") == "1"
@@ -475,12 +547,13 @@ def _synthesize_vibevoice_remote(
     if parsed_basic.scheme.lower() not in {"http", "https"} or not parsed_basic.hostname:
         raise ValueError("Invalid VIBEVOICE_REMOTE_URL")
 
+    deadline = time.monotonic() + 300.0
     if allow_private:
         opener = urllib.request.build_opener(_RejectRedirectHandler())
     else:
-        parsed, pinned_ip = _validate_and_resolve_url(target_url)
+        parsed, pinned_ips = _resolve_pinned_candidates(target_url)
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
-        opener = _build_pinned_opener({(parsed.hostname.lower(), port): pinned_ip})
+        opener = _open_pinned_opener({(parsed.hostname.lower(), port): pinned_ips}, deadline=deadline)
 
     speakers = [s for s in (script.host_a, script.host_b, script.guest_name) if s]
     payload = json.dumps(
@@ -496,7 +569,6 @@ def _synthesize_vibevoice_remote(
         method="POST",
     )
     final_audio = episode_dir / "podcast.wav"
-    deadline = time.monotonic() + 300.0
     with opener.open(req, timeout=300) as resp:
         headers = getattr(resp, "headers", None)
         ctype = ((headers.get("Content-Type") if headers else None) or "").split(";", 1)[0].strip().lower()
@@ -513,12 +585,12 @@ def _synthesize_vibevoice_remote(
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(audio_bytes)
+        total_duration = probe_duration_sec(tmp_audio)
         os.replace(tmp_audio, final_audio)
     except Exception:
         Path(tmp_audio).unlink(missing_ok=True)
         raise
 
-    total_duration = probe_duration_sec(str(final_audio))
     segments = _estimate_timeline_by_char_length(script, total_duration)
 
     return _finalize_synthesis(
@@ -544,32 +616,35 @@ def synthesize_podcast(
     on_progress: Optional[Callable[[str, int, int], None]] = None,
 ) -> SynthesisResult:
     """Synthesize a PodcastScript into an audio file and aligned timeline JSON."""
-    episode_dir = Path(output_root) / episode_id
-    episode_dir.mkdir(parents=True, exist_ok=True)
+    with episode_lock(episode_id):
+        episode_dir = Path(output_root) / episode_id
+        episode_dir.mkdir(parents=True, exist_ok=True)
 
-    (episode_dir / "vibevoice_script.txt").write_text(
-        script.to_vibevoice_text(), encoding="utf-8"
-    )
+        _atomic_write_text(
+            episode_dir / "vibevoice_script.txt",
+            script.to_vibevoice_text(),
+            prefix=".script_",
+        )
 
-    resolved_remote = remote_url or os.environ.get("VIBEVOICE_REMOTE_URL")
-    if engine == "vibevoice_remote" or (engine == "auto" and resolved_remote):
-        if not resolved_remote:
-            raise ValueError("VIBEVOICE_REMOTE_URL is required for vibevoice_remote engine")
-        if os.environ.get("VIBEPODCAST_ALLOW_PRIVATE_REMOTE") != "1":
-            from vibe_podcast.connectors import _validate_public_url
+        resolved_remote = remote_url or os.environ.get("VIBEVOICE_REMOTE_URL")
+        if engine == "vibevoice_remote" or (engine == "auto" and resolved_remote):
+            if not resolved_remote:
+                raise ValueError("VIBEVOICE_REMOTE_URL is required for vibevoice_remote engine")
+            if os.environ.get("VIBEPODCAST_ALLOW_PRIVATE_REMOTE") != "1":
+                from vibe_podcast.connectors import _validate_public_url
 
-            _validate_public_url(resolved_remote)
-        if on_progress:
-            on_progress("synthesizing", 1, 1)
-        return _synthesize_vibevoice_remote(script, episode_dir, episode_id, resolved_remote)
+                _validate_public_url(resolved_remote)
+            if on_progress:
+                on_progress("synthesizing", 1, 1)
+            return _synthesize_vibevoice_remote(script, episode_dir, episode_id, resolved_remote)
 
-    return _synthesize_edge_dialogue(
-        script=script,
-        episode_dir=episode_dir,
-        episode_id=episode_id,
-        language=language,
-        voice_map=voice_map,
-        enable_loudnorm=enable_loudnorm,
-        enable_sfx=enable_sfx,
-        on_progress=on_progress,
-    )
+        return _synthesize_edge_dialogue(
+            script=script,
+            episode_dir=episode_dir,
+            episode_id=episode_id,
+            language=language,
+            voice_map=voice_map,
+            enable_loudnorm=enable_loudnorm,
+            enable_sfx=enable_sfx,
+            on_progress=on_progress,
+        )

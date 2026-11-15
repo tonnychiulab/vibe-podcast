@@ -504,3 +504,388 @@ def test_rss_strips_xml_illegal_control_chars_and_sse_releases_slot_on_disconnec
                 break
             time.sleep(0.02)
         assert acquired is True
+
+
+def test_pdftotext_stderr_flood_and_stall_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+    import sys
+    import pypdf
+    from vibe_podcast.routes import studio as studio_routes
+
+    srv = _load_isolated_server(tmp_path, monkeypatch)
+    admin = TestClient(srv.app, headers={"Authorization": f"Bearer {srv.SESSION_TOKEN}"})
+
+    class _EmptyReader:
+        def __init__(self, _stream):
+            self.pages = [type("_Page", (), {"extract_text": lambda self: ""})()]
+
+    monkeypatch.setattr(pypdf, "PdfReader", _EmptyReader)
+    monkeypatch.setattr(studio_routes.shutil, "which", lambda _cmd: "fake-pdftotext")
+
+    real_popen = subprocess.Popen
+
+    def _noisy_popen(_args, **_kw):
+        assert _kw.get("stderr") is subprocess.DEVNULL
+        script = (
+            "import sys; "
+            "sys.stderr.write('W' * 150000); sys.stderr.flush(); "
+            "sys.stdout.write('extracted ok'); sys.stdout.flush()"
+        )
+        return real_popen(
+            [sys.executable, "-c", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+
+    monkeypatch.setattr(studio_routes.subprocess, "Popen", _noisy_popen)
+    res_ok = admin.post(
+        "/api/upload-source",
+        json={"filename": "noisy.pdf", "content_base64": base64.b64encode(b"%PDF-1.4").decode("ascii")},
+    )
+    assert res_ok.status_code == 200
+    assert res_ok.json()["text"] == "extracted ok"
+
+    monkeypatch.setattr(studio_routes, "_PDFTOTEXT_TIMEOUT_SEC", 0.2)
+
+    def _stalled_popen(_args, **_kw):
+        return real_popen(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+
+    monkeypatch.setattr(studio_routes.subprocess, "Popen", _stalled_popen)
+    started = time.monotonic()
+    res_timeout = admin.post(
+        "/api/upload-source",
+        json={"filename": "hang.pdf", "content_base64": base64.b64encode(b"%PDF-1.4").decode("ascii")},
+    )
+    elapsed = time.monotonic() - started
+    assert res_timeout.status_code == 422
+    assert elapsed < 2.0
+
+
+def test_socket_trickle_proxy_bypass_and_multi_ip_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import socket
+    import threading
+    import urllib.request
+    from vibe_podcast import connectors
+
+    with monkeypatch.context() as m:
+        m.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+        opener = connectors._build_pinned_opener({("example.com", 80): ["93.184.216.34"]})
+        assert not any(isinstance(h, urllib.request.ProxyHandler) for h in opener.handlers)
+
+        m.setattr(
+            connectors.socket,
+            "getaddrinfo",
+            lambda *_a, **_kw: [
+                (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:4860:4860::8888", 443, 0, 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+            ],
+        )
+        _, ips = connectors._resolve_validated_ips("https://dual.example.com/")
+        assert ips == ["93.184.216.34", "2001:4860:4860::8888"]
+
+        # Multi-IP connect budget: failing candidate honors per_ip_cap and falls back cleanly
+        recorded_timeouts: list[float | None] = []
+
+        def _fake_create_conn(addr, timeout=None, _src=None):
+            recorded_timeouts.append(timeout)
+            if addr[0] == "93.184.216.34":
+                raise OSError("simulated connect failure")
+            return "connected-sock"
+
+        m.setattr(connectors.socket, "create_connection", _fake_create_conn)
+        sock = connectors._connect_pinned_candidates(
+            ["93.184.216.34", "93.184.216.35"],
+            443,
+            30.0,
+            None,
+            deadline=time.monotonic() + 20.0,
+            per_ip_cap=1.25,
+        )
+        assert sock == "connected-sock"
+        assert all(t is not None and t <= 1.25 for t in recorded_timeouts)
+
+    # Real socketpair trickle stream tests read1 + raw_sock.settimeout across Content-Length and chunked
+    import http.client
+
+    for mode in ("content-length", "chunked"):
+        client_sock, server_sock = socket.socketpair()
+
+        def _serve(sock_obj=server_sock, response_mode=mode):
+            try:
+                if response_mode == "chunked":
+                    sock_obj.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+                    for _ in range(10):
+                        sock_obj.sendall(b"1\r\nx\r\n")
+                        time.sleep(0.05)
+                else:
+                    sock_obj.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
+                    for _ in range(10):
+                        sock_obj.sendall(b"x")
+                        time.sleep(0.05)
+            except OSError:
+                pass
+            finally:
+                sock_obj.close()
+
+        t = threading.Thread(target=_serve, daemon=True)
+        t.start()
+        resp = http.client.HTTPResponse(client_sock)
+        resp.begin()
+        started = time.monotonic()
+        try:
+            with pytest.raises(TimeoutError):
+                connectors._read_bounded_stream(resp, 1024, deadline=time.monotonic() + 0.14)
+        finally:
+            resp.close()
+        assert (time.monotonic() - started) < 0.7
+
+
+def test_fenced_json_edge_cases_and_ollama_read_bounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vibe_podcast import scriptwriter
+
+    nested_ticks = '```json5\n{"a": "```python\\nprint(1)\\n```", "u": "hi\u2028there"}\n```'
+    assert scriptwriter.extract_json(nested_ticks)["a"].startswith("```python")
+
+    single_line_prose = '```json {"code": "```py```", "k": 1}``` done!'
+    assert scriptwriter.extract_json(single_line_prose)["k"] == 1
+
+    degenerate_empty_pair = '``` ```\n```json\n{"ok": true}\n```'
+    assert scriptwriter.extract_json(degenerate_empty_pair) == {"ok": True}
+
+    four_ticks = '````json\n{"inner": "```"}\n````'
+    assert scriptwriter.extract_json(four_ticks) == {"inner": "```"}
+
+    class _HugeOllamaResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, _n: int = 16384) -> bytes:
+            return b"{" + (b"x" * 200_000)
+
+    monkeypatch.setattr(scriptwriter, "_MAX_OLLAMA_RESPONSE_BYTES", 1024)
+    monkeypatch.setattr(scriptwriter.urllib.request, "urlopen", lambda *_a, **_kw: _HugeOllamaResp())
+    with pytest.raises(ValueError, match="Ollama response exceeded"):
+        scriptwriter._call_ollama("hello")
+
+
+def test_atomic_resynthesis_merge_and_refcounted_episode_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+    import threading
+    from pydantic import ValidationError
+    from vibe_podcast import audio_fx
+
+    # 1. merge_turns_to_mp3 failure leaves existing podcast.mp3 untouched
+    ep_dir = tmp_path / "ep-atomic"
+    turns_dir = ep_dir / "turns"
+    turns_dir.mkdir(parents=True)
+    turn0 = turns_dir / "turn_000.mp3"
+    audio_fx.generate_silence_mp3(0.4, str(turn0))
+    final_mp3 = ep_dir / "podcast.mp3"
+    final_mp3.write_bytes(b"ORIGINAL_MP3_BYTES")
+    turns = [
+        scriptwriter.DialogueTurn(
+            speaker="Speaker 1", speaker_name="志明", text="原始內容", cue="calm", chapter="hook"
+        )
+    ]
+
+    orig_probe = audio_fx.probe_duration_sec
+    monkeypatch.setattr(audio_fx.subprocess, "run", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("ffmpeg fail")))
+    with pytest.raises(RuntimeError, match="ffmpeg fail"):
+        audio_fx.merge_turns_to_mp3(turns, [turn0], ep_dir, turns_dir, enable_loudnorm=False)
+    assert final_mp3.read_bytes() == b"ORIGINAL_MP3_BYTES"
+    monkeypatch.undo()
+
+    # 2. resynthesize_turn invalid cue fails before modifying any audio/script/timeline
+    orig_turn_bytes = turn0.read_bytes()
+    orig_script_txt = "Speaker 1: 原始內容\n"
+    (ep_dir / "vibevoice_script.txt").write_text(orig_script_txt, encoding="utf-8")
+    timeline_data = synthesizer.SynthesisResult(
+        episode_id="ep-atomic",
+        title="Atomic Test",
+        summary="Sum",
+        host_a="志明",
+        host_b="春嬌",
+        engine="edge_dialogue",
+        audio_path=str(final_mp3),
+        timeline_path=str(ep_dir / "timeline.json"),
+        duration_sec=0.4,
+        segments=[
+            synthesizer.TimelineSegment(
+                index=0,
+                speaker="Speaker 1",
+                speaker_name="志明",
+                text="原始內容",
+                start_sec=0.0,
+                end_sec=0.4,
+                cue="calm",
+                chapter="hook",
+            )
+        ],
+    )
+    (ep_dir / "timeline.json").write_text(timeline_data.model_dump_json(indent=2), encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        synthesizer.resynthesize_turn(ep_dir, "ep-atomic", 0, "更新內容", new_cue="x" * 61)
+    assert turn0.read_bytes() == orig_turn_bytes
+    assert final_mp3.read_bytes() == b"ORIGINAL_MP3_BYTES"
+    assert (ep_dir / "vibevoice_script.txt").read_text(encoding="utf-8") == orig_script_txt
+
+    # Even if ffprobe fails AFTER merge during resynthesize_turn, persistent files stay intact
+    async def _fake_edge_tts(_t, _v, out_path, **_kw):
+        audio_fx.generate_silence_mp3(0.5, out_path)
+        return "zh-TW-YunJheNeural"
+
+    monkeypatch.setattr(synthesizer, "_edge_tts_to_file", _fake_edge_tts)
+    monkeypatch.setattr(synthesizer, "probe_duration_sec", lambda _p: (_ for _ in ()).throw(RuntimeError("ffprobe boom")))
+    with pytest.raises(RuntimeError, match="ffprobe boom"):
+        synthesizer.resynthesize_turn(ep_dir, "ep-atomic", 0, "更新內容", new_cue="calm")
+    assert final_mp3.read_bytes() == b"ORIGINAL_MP3_BYTES"
+    assert turn0.read_bytes() == orig_turn_bytes
+    assert (ep_dir / "vibevoice_script.txt").read_text(encoding="utf-8") == orig_script_txt
+    assert orig_probe(str(turn0)) > 0
+
+    # 3. Concurrent refcounted episode_lock preserves exclusion & cleans up
+    synthesizer._EPISODE_LOCKS.clear()
+    active_count = 0
+    max_active = 0
+    order_log: list[str] = []
+    t1_inside = threading.Event()
+    t2_waiting = threading.Event()
+
+    def _worker_a():
+        nonlocal active_count, max_active
+        with synthesizer.episode_lock("ep-conc"):
+            active_count += 1
+            max_active = max(max_active, active_count)
+            t1_inside.set()
+            t2_waiting.wait(timeout=2.0)
+            time.sleep(0.05)
+            order_log.append("A")
+            active_count -= 1
+
+    def _worker_b():
+        nonlocal active_count, max_active
+        t1_inside.wait(timeout=2.0)
+        t2_waiting.set()
+        with synthesizer.episode_lock("ep-conc"):
+            active_count += 1
+            max_active = max(max_active, active_count)
+            time.sleep(0.05)
+            order_log.append("B")
+            active_count -= 1
+
+    def _worker_c():
+        t2_waiting.wait(timeout=2.0)
+        time.sleep(0.01)
+        with synthesizer.episode_lock("ep-conc"):
+            nonlocal active_count, max_active
+            active_count += 1
+            max_active = max(max_active, active_count)
+            order_log.append("C")
+            active_count -= 1
+
+    threads = [threading.Thread(target=fn) for fn in (_worker_a, _worker_b, _worker_c)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5.0)
+    assert max_active == 1
+    assert len(order_log) == 3
+    assert "ep-conc" not in synthesizer._EPISODE_LOCKS
+
+    # 4. 400 / 404 routes do not leave lock entries behind
+    srv = _load_isolated_server(tmp_path, monkeypatch)
+    admin = TestClient(srv.app, headers={"Authorization": f"Bearer {srv.SESSION_TOKEN}"})
+    assert admin.delete("/api/episodes/nonexistent-ep-1").status_code == 404
+    assert admin.post("/api/episodes/nonexistent-ep-2/turns/0", json={"text": "hi"}).status_code == 404
+    assert "nonexistent-ep-1" not in synthesizer._EPISODE_LOCKS
+    assert "nonexistent-ep-2" not in synthesizer._EPISODE_LOCKS
+
+
+def test_agy_nul_byte_rss_nonchars_and_preauth_listen_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+    from vibe_podcast import scriptwriter
+
+    seen_cmd: list[str] = []
+
+    def _fake_run(cmd, **_kw):
+        seen_cmd.extend(cmd)
+        return type("_Proc", (), {"stdout": "ok", "returncode": 0})()
+
+    monkeypatch.setattr(scriptwriter.shutil, "which", lambda _name: "/usr/local/bin/agy")
+    monkeypatch.setattr(scriptwriter.subprocess, "run", _fake_run)
+    assert scriptwriter._call_agy_cli("hello\x00world") == "ok"
+    assert all("\x00" not in part for part in seen_cmd)
+
+    ep = synthesizer.SynthesisResult(
+        episode_id="ep-nonchar",
+        title="Bad\ufffeTitle\uffffAnd\ud800Surrogate",
+        summary="Clean\uffffSummary",
+        host_a="志明",
+        host_b="春嬌",
+        engine="edge_dialogue",
+        audio_path="/tmp/a.mp3",
+        timeline_path="/tmp/t.json",
+        duration_sec=1.0,
+        segments=[],
+    )
+    rss = exporters.episodes_to_rss_xml([ep], "https://podcast.example.com")
+    root = ET.fromstring(rss)
+    assert root.findtext("./channel/item/title") == "BadTitleAndSurrogate"
+
+    srv = _load_isolated_server(tmp_path, monkeypatch)
+    anon = TestClient(srv.app)
+    html_res = anon.get("/")
+    assert html_res.status_code == 200
+    assert 'class="app-shell mode-listen"' in html_res.text
+    assert 'id="mode-studio"' in html_res.text and "hidden" in html_res.text.split('id="mode-studio"', 1)[1].split(">", 1)[0]
+    assert 'id="btn-open-prefs"' in html_res.text and "hidden" in html_res.text.split('id="btn-open-prefs"', 1)[1].split(">", 1)[0]
+
+    # Remote VibeVoice with empty Content-Type & non-WAV payload fails before writing podcast.wav
+    monkeypatch.setenv("VIBEPODCAST_ALLOW_PRIVATE_REMOTE", "1")
+    ep_dir = tmp_path / "ep-empty-ctype"
+    ep_dir.mkdir()
+    script = scriptwriter.PodcastScript(
+        title="WavCheck",
+        summary="Sum",
+        turns=[scriptwriter.DialogueTurn(speaker="Speaker 1", speaker_name="志明", text="測試")],
+    )
+
+    class _EmptyCtypeResp:
+        headers = {"Content-Type": ""}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, n: int = 16384) -> bytes:
+            if getattr(self, "_done", False):
+                return b""
+            self._done = True
+            return b"<b>not wav</b>"
+
+    class _EmptyCtypeOpener:
+        def open(self, _req, timeout=300):
+            return _EmptyCtypeResp()
+
+    monkeypatch.setattr(synthesizer.urllib.request, "build_opener", lambda *a, **kw: _EmptyCtypeOpener())
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        synthesizer._synthesize_vibevoice_remote(script, ep_dir, "ep-empty-ctype", "http://127.0.0.1:9999")
+    assert not (ep_dir / "podcast.wav").exists()

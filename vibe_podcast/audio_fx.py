@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -242,6 +243,7 @@ def merge_turns_to_mp3(
     pause_sec: float = 0.28,
     enable_loudnorm: bool = True,
     enable_sfx: bool = False,
+    output_path: Optional[Path] = None,
 ) -> tuple[Path, List[TimelineSegment]]:
     """Mix per-turn MP3 clips with cue-driven pacing/overlaps, chapter chimes, and loudnorm."""
     if not turns or len(turns) != len(turn_files):
@@ -254,7 +256,7 @@ def merge_turns_to_mp3(
             generate_transition_chime_mp3(str(chime_path))
         chime_sec = probe_duration_sec(str(chime_path))
 
-    final_audio = episode_dir / "podcast.mp3"
+    final_audio = output_path or (episode_dir / "podcast.mp3")
     with tempfile.TemporaryDirectory(prefix="vp_trim_") as trim_tmp:
         trim_dir = Path(trim_tmp)
         effective_files = [
@@ -342,26 +344,35 @@ def merge_turns_to_mp3(
             )
 
         base_filter = ";".join(filter_parts)
-        tail_cmd = ["-c:a", "libmp3lame", "-q:a", "2", str(final_audio)]
+        fd, tmp_name = tempfile.mkstemp(dir=str(episode_dir), prefix=".podcast_", suffix=".tmp.mp3")
+        os.close(fd)
+        tmp_audio = Path(tmp_name)
+        tail_cmd = ["-c:a", "libmp3lame", "-q:a", "2", str(tmp_audio)]
 
-        if enable_loudnorm:
-            try:
-                loudnorm_filter = f"{base_filter};[mixed]loudnorm=I=-16:TP=-1.5:LRA=11[out]"
-                subprocess.run(
-                    ["ffmpeg", "-y", *input_args, "-filter_complex", loudnorm_filter, "-map", "[out]", *tail_cmd],
-                    capture_output=True,
-                    check=True,
-                    timeout=120,
-                )
-                return final_audio, segments
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-                logger.warning("ffmpeg loudnorm failed; falling back to plain mix: %s", getattr(exc, "stderr", exc))
+        try:
+            if enable_loudnorm:
+                try:
+                    loudnorm_filter = f"{base_filter};[mixed]loudnorm=I=-16:TP=-1.5:LRA=11[out]"
+                    subprocess.run(
+                        ["ffmpeg", "-y", *input_args, "-filter_complex", loudnorm_filter, "-map", "[out]", *tail_cmd],
+                        capture_output=True,
+                        check=True,
+                        timeout=120,
+                    )
+                    os.replace(tmp_audio, final_audio)
+                    return final_audio, segments
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                    logger.warning("ffmpeg loudnorm failed; falling back to plain mix: %s", getattr(exc, "stderr", exc))
 
-        plain_filter = f"{base_filter};[mixed]anull[out]"
-        subprocess.run(
-            ["ffmpeg", "-y", *input_args, "-filter_complex", plain_filter, "-map", "[out]", *tail_cmd],
-            capture_output=True,
-            check=True,
-            timeout=120,
-        )
-        return final_audio, segments
+            plain_filter = f"{base_filter};[mixed]anull[out]"
+            subprocess.run(
+                ["ffmpeg", "-y", *input_args, "-filter_complex", plain_filter, "-map", "[out]", *tail_cmd],
+                capture_output=True,
+                check=True,
+                timeout=120,
+            )
+            os.replace(tmp_audio, final_audio)
+            return final_audio, segments
+        except Exception:
+            tmp_audio.unlink(missing_ok=True)
+            raise

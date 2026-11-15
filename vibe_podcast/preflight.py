@@ -8,6 +8,8 @@ import json
 import os
 import shutil
 import sys
+import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import List, Optional
@@ -45,11 +47,12 @@ def _probe_http_ok(url: str, timeout: float = 1.5, *, enforce_public: bool = Fal
         if parsed_basic.scheme.lower() not in {"http", "https"} or not parsed_basic.hostname:
             return False
         if enforce_public:
-            from vibe_podcast.connectors import _build_pinned_opener, _validate_and_resolve_url
+            from vibe_podcast.connectors import _open_pinned_opener, _resolve_pinned_candidates
 
-            parsed, pinned_ip = _validate_and_resolve_url(url)
+            parsed, pinned_ips = _resolve_pinned_candidates(url)
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            opener = _build_pinned_opener({(parsed.hostname.lower(), port): pinned_ip})
+            deadline = time.monotonic() + timeout
+            opener = _open_pinned_opener({(parsed.hostname.lower(), port): pinned_ips}, deadline=deadline)
             req = urllib.request.Request(url, method="GET")
             with opener.open(req, timeout=timeout) as resp:
                 return 200 <= resp.status < 500
@@ -62,14 +65,20 @@ def _probe_http_ok(url: str, timeout: float = 1.5, *, enforce_public: bool = Fal
 
 
 def _is_dir_writable(target: Path) -> bool:
+    tmp_path: Optional[Path] = None
     try:
         target.mkdir(parents=True, exist_ok=True)
-        probe = target / ".preflight_write_test"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=target, prefix=".preflight_", suffix=".tmp", mode="w", encoding="utf-8", delete=False
+        ) as fh:
+            tmp_path = Path(fh.name)
+            fh.write("ok")
         return True
     except Exception:
         return False
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
 
 
 def run_preflight(

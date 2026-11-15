@@ -24,7 +24,11 @@ from vibe_podcast.guardrails import ContentSafetyError
 from vibe_podcast.i18n import DEFAULT_LOCALE, get_error_message
 from vibe_podcast.routes import get_server
 from vibe_podcast.schemas import EpisodeSummary, ResynthesizeTurnRequest
-from vibe_podcast.synthesizer import SynthesisResult, episode_lock, resynthesize_turn
+from vibe_podcast.synthesizer import (
+    SynthesisResult,
+    episode_lock,
+    resynthesize_turn,
+)
 
 logger = logging.getLogger("vibe_podcast.routes.episodes")
 
@@ -33,9 +37,13 @@ _EPISODE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 _HOST_HEADER_RE = re.compile(r"^(?:\[[0-9a-fA-F:]+\]|[a-zA-Z0-9.-]+)(?::\d{1,5})?$")
 
 
-def _resolve_episode_dir(episode_id: str, lang: str = DEFAULT_LOCALE) -> Path:
+def _validate_episode_id(episode_id: str, lang: str = DEFAULT_LOCALE) -> None:
     if not _EPISODE_ID_RE.fullmatch(episode_id):
         raise HTTPException(status_code=400, detail=get_error_message("invalid_episode_id", lang))
+
+
+def _resolve_episode_dir(episode_id: str, lang: str = DEFAULT_LOCALE) -> Path:
+    _validate_episode_id(episode_id, lang)
     episodes_dir = get_server().EPISODES_DIR
     raw_dir = episodes_dir / episode_id
     if raw_dir.is_symlink():
@@ -152,31 +160,33 @@ def update_episode_turn(
     episode_id: str, turn_index: int, req: ResynthesizeTurnRequest
 ) -> SynthesisResult:
     """Edit and re-synthesize a single turn in-place for an existing episode."""
+    _validate_episode_id(episode_id, req.ui_lang)
     srv = get_server()
     srv._acquire_generation_slot(req.ui_lang)
     try:
-        ep_dir = _resolve_episode_dir(episode_id, req.ui_lang)
-        try:
-            return resynthesize_turn(
-                episode_dir=ep_dir,
-                episode_id=episode_id,
-                turn_index=turn_index,
-                new_text=req.text,
-                new_cue=req.cue,
-            )
-        except ContentSafetyError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=get_error_message("safety_blocked", req.ui_lang, detail=str(exc)),
-            ) from exc
-        except IndexError as exc:
-            raise HTTPException(status_code=404, detail="Turn index out of range") from exc
-        except (TimeoutError, subprocess.TimeoutExpired) as exc:
-            raise HTTPException(status_code=504, detail="Turn re-synthesis timed out") from exc
-        except (subprocess.CalledProcessError, RuntimeError) as exc:
-            raise HTTPException(status_code=502, detail="Turn re-synthesis failed") from exc
-        except (ValueError, FileNotFoundError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with episode_lock(episode_id):
+            ep_dir = _resolve_episode_dir(episode_id, req.ui_lang)
+            try:
+                return resynthesize_turn(
+                    episode_dir=ep_dir,
+                    episode_id=episode_id,
+                    turn_index=turn_index,
+                    new_text=req.text,
+                    new_cue=req.cue,
+                )
+            except ContentSafetyError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=get_error_message("safety_blocked", req.ui_lang, detail=str(exc)),
+                ) from exc
+            except IndexError as exc:
+                raise HTTPException(status_code=404, detail="Turn index out of range") from exc
+            except (TimeoutError, subprocess.TimeoutExpired) as exc:
+                raise HTTPException(status_code=504, detail="Turn re-synthesis timed out") from exc
+            except (subprocess.CalledProcessError, RuntimeError) as exc:
+                raise HTTPException(status_code=502, detail="Turn re-synthesis failed") from exc
+            except (ValueError, FileNotFoundError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         srv._GENERATION_SEMAPHORE.release()
 
@@ -184,6 +194,7 @@ def update_episode_turn(
 @router.delete("/api/episodes/{episode_id}")
 def delete_episode(episode_id: str, lang: str = DEFAULT_LOCALE) -> dict:
     """Delete a synthesized podcast episode directory."""
+    _validate_episode_id(episode_id, lang)
     with episode_lock(episode_id):
         ep_dir = _resolve_episode_dir(episode_id, lang)
         shutil.rmtree(ep_dir)

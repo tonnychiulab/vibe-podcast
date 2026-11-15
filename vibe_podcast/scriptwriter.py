@@ -10,6 +10,7 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -93,33 +94,52 @@ class PodcastScript(BaseModel):
 
 
 def _wrap_untrusted_xml(tag_prefix: str, content: str) -> tuple[str, str]:
-    """Generate a randomized XML wrapper tag and strip matching tags from untrusted text."""
+    """Generate a randomized XML wrapper tag and strip matching tags and NUL bytes."""
     doc_tag = f"{tag_prefix}_{secrets.token_hex(8)}"
-    cleaned = re.sub(rf"</?\s*{re.escape(tag_prefix)}[^>]*>", "", content, flags=re.IGNORECASE)
+    no_nul = (content or "").replace("\x00", "")
+    cleaned = re.sub(rf"</?\s*{re.escape(tag_prefix)}[^>]*>", "", no_nul, flags=re.IGNORECASE)
     return doc_tag, cleaned
 
 
 _EXTRACT_JSON_MAX_CHARS = 250_000
 _EXTRACT_JSON_MAX_PROBES = 20
+_MAX_OLLAMA_RESPONSE_BYTES = 1_000_000
+_FENCE_OPEN_RE = re.compile(r"^(`{3,})(.*)$")
 
 
 def _iter_fenced_blocks(text: str):
-    """Yield markdown code fence bodies linearly without backtracking regexes."""
-    pos = 0
-    while pos < len(text):
-        start = text.find("```", pos)
-        if start == -1:
-            break
-        body_start = start + 3
-        if text[body_start : body_start + 4].lower() == "json":
-            body_start += 4
-        while body_start < len(text) and text[body_start] in " \t\r\n":
-            body_start += 1
-        end = text.find("```", body_start)
-        if end == -1:
-            break
-        yield text[body_start:end].strip()
-        pos = end + 3
+    """Yield markdown code fence bodies cleanly without premature mid-line string closes."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].lstrip()
+        open_match = _FENCE_OPEN_RE.match(stripped)
+        if not open_match:
+            i += 1
+            continue
+        fence_len = len(open_match.group(1))
+        rest = open_match.group(2)
+        close_inline = re.search(rf"`{{{fence_len},}}([^`{{}}]*)$", rest)
+        if close_inline:
+            single = rest[: close_inline.start()].strip()
+            brace = single.find("{")
+            if brace != -1:
+                yield single[brace:].strip()
+            i += 1
+            continue
+        if re.fullmatch(r"\s*`+\s*", rest):
+            i += 1
+            continue
+        close_re = re.compile(rf"^\s*`{{{fence_len},}}\s*$")
+        body_lines: List[str] = []
+        j = i + 1
+        while j < len(lines):
+            if close_re.match(lines[j]):
+                yield "\n".join(body_lines).strip()
+                break
+            body_lines.append(lines[j])
+            j += 1
+        i = j + 1
 
 
 def extract_json(text: str) -> Dict[str, Any]:
@@ -330,9 +350,10 @@ def _call_agy_cli(
     if not agy_bin:
         raise RuntimeError("`agy` CLI not found in PATH")
     chosen_model = _validate_model_name(model) if (model or "").strip() else "gemini-3.8-flash-medium"
+    safe_prompt = prompt.replace("\x00", "")
     with tempfile.TemporaryDirectory(prefix="vp_agy_") as tmpdir:
         proc = subprocess.run(
-            [agy_bin, "-p", prompt, "--sandbox", "--disable-slash-commands", "--model", chosen_model],
+            [agy_bin, "-p", safe_prompt, "--sandbox", "--disable-slash-commands", "--model", chosen_model],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -364,14 +385,23 @@ def _call_ollama(
             "temperature": 0.7,
         }
     ).encode("utf-8")
+    from vibe_podcast.connectors import _read_bounded_stream
+
     req = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    deadline = time.monotonic() + float(timeout)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+        raw = _read_bounded_stream(
+            resp,
+            max_bytes=_MAX_OLLAMA_RESPONSE_BYTES,
+            deadline=deadline,
+            exceeded_error="Ollama response exceeded maximum allowed size",
+        )
+        data = json.loads(raw.decode("utf-8"))
     return data["choices"][0]["message"]["content"]
 
 

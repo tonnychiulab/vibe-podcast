@@ -16,11 +16,11 @@ def _safe_seconds(seconds: float) -> float:
     return seconds if isinstance(seconds, (int, float)) and math.isfinite(seconds) else 0.0
 
 
-_XML_ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_XML_ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ud800-\udfff\ufffe\uffff]")
 
 
 def _strip_xml_illegal(value: str) -> str:
-    """Remove ASCII control characters forbidden in XML 1.0 documents."""
+    """Remove control characters, surrogates, and non-characters forbidden in XML 1.0."""
     return _XML_ILLEGAL_CTRL_RE.sub("", value or "")
 
 

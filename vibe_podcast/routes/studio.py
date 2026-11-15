@@ -47,6 +47,7 @@ from vibe_podcast.synthesizer import AVAILABLE_VOICES, SynthesisResult, synthesi
 logger = logging.getLogger("vibe_podcast.routes.studio")
 
 router = APIRouter()
+_PDFTOTEXT_TIMEOUT_SEC = 30.0
 
 
 @router.get("/api/health")
@@ -284,20 +285,36 @@ def upload_source_file(req: UploadSourceRequest) -> dict:
                 with os.fdopen(fd, "wb") as fh:
                     fh.write(raw_bytes)
                 max_stdout_bytes = MAX_EXTRACTED_CHARS * 4
-                deadline = time.monotonic() + 30.0
+                deadline = time.monotonic() + _PDFTOTEXT_TIMEOUT_SEC
                 proc = subprocess.Popen(
                     [pdftotext_bin, "-f", "1", "-l", str(MAX_PDF_PAGES), tmp_pdf, "-"],
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
                 )
+                timed_out = threading.Event()
+
+                def _kill_pdftotext() -> None:
+                    timed_out.set()
+                    if proc.poll() is None:
+                        try:
+                            proc.kill()
+                        except OSError:
+                            pass
+
+                watchdog = threading.Timer(_PDFTOTEXT_TIMEOUT_SEC, _kill_pdftotext)
+                watchdog.daemon = True
+                watchdog.start()
                 buf = bytearray()
                 capped = False
                 try:
                     assert proc.stdout is not None
+                    reader = getattr(proc.stdout, "read1", proc.stdout.read)
                     while len(buf) < max_stdout_bytes:
-                        if time.monotonic() > deadline:
-                            raise subprocess.TimeoutExpired(proc.args, 30)
-                        chunk = proc.stdout.read(min(16_384, max_stdout_bytes - len(buf)))
+                        if timed_out.is_set() or time.monotonic() > deadline:
+                            raise subprocess.TimeoutExpired(proc.args, _PDFTOTEXT_TIMEOUT_SEC)
+                        chunk = reader(min(16_384, max_stdout_bytes - len(buf)))
+                        if timed_out.is_set() or time.monotonic() > deadline:
+                            raise subprocess.TimeoutExpired(proc.args, _PDFTOTEXT_TIMEOUT_SEC)
                         if not chunk:
                             break
                         buf.extend(chunk)
@@ -306,6 +323,8 @@ def upload_source_file(req: UploadSourceRequest) -> dict:
                         proc.kill()
                     remaining_wait = max(0.5, deadline - time.monotonic())
                     proc.wait(timeout=remaining_wait)
+                    if timed_out.is_set():
+                        raise subprocess.TimeoutExpired(proc.args, _PDFTOTEXT_TIMEOUT_SEC)
                     if not capped and proc.returncode != 0:
                         raise subprocess.CalledProcessError(proc.returncode, proc.args)
                     extracted = bytes(buf).decode("utf-8", errors="replace").strip()
@@ -314,6 +333,13 @@ def upload_source_file(req: UploadSourceRequest) -> dict:
                         proc.kill()
                         proc.wait()
                     raise
+                finally:
+                    watchdog.cancel()
+                    if proc.stdout is not None:
+                        try:
+                            proc.stdout.close()
+                        except OSError:
+                            pass
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
                 raise HTTPException(
                     status_code=422,

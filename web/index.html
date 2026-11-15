@@ -15,19 +15,19 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div id="app-shell" class="app-shell">
+  <div id="app-shell" class="app-shell mode-listen">
     <aside id="sidebar" class="sidebar">
       <div class="brand">
         <div class="brand-top">
           <span id="brand-badge" class="brand-badge">🍜 老馬麵攤 STUDIO</span>
           <div class="brand-top-actions">
             <span id="app-version" class="version-badge">v0.3.0</span>
-            <button id="btn-open-prefs" type="button" class="btn-icon-pill" aria-haspopup="dialog" aria-controls="prefs-modal" title="偏好設定">⚙️</button>
+            <button id="btn-open-prefs" type="button" class="btn-icon-pill" aria-haspopup="dialog" aria-controls="prefs-modal" title="偏好設定" hidden>⚙️</button>
           </div>
         </div>
         <div class="mode-switch" role="tablist" aria-label="Workspace Mode">
-          <button id="mode-listen" type="button" class="mode-btn" role="tab" aria-selected="false">🎧 收聽模式</button>
-          <button id="mode-studio" type="button" class="mode-btn active" role="tab" aria-selected="true">🎛️ 製作模式</button>
+          <button id="mode-listen" type="button" class="mode-btn active" role="tab" aria-selected="true">🎧 收聽模式</button>
+          <button id="mode-studio" type="button" class="mode-btn" role="tab" aria-selected="false" hidden>🎛️ 製作模式</button>
         </div>
       </div>
 

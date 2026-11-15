@@ -85,6 +85,11 @@ function applyMeta(meta) {
   if (btnOpenPrefs) btnOpenPrefs.hidden = !isAdmin;
   if (!isAdmin) {
     setWorkspaceMode("listen", false);
+  } else {
+    const savedMode = localStorage.getItem("vp_ui_mode");
+    if (savedMode === "listen" || savedMode === "studio") {
+      setWorkspaceMode(savedMode, false);
+    }
   }
   document.documentElement.lang = meta.locale === "en-US" ? "en" : "zh-Hant";
   document.title = meta.brand.html_title;
@@ -476,10 +481,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-const savedMode = localStorage.getItem("vp_ui_mode");
-if (savedMode === "listen" || savedMode === "studio") {
-  setWorkspaceMode(savedMode, false);
-}
+setWorkspaceMode("listen", false);
 if (localStorage.getItem("vp_sidebar_collapsed") === "1") {
   setSidebarCollapsed(true, false);
 }

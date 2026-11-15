@@ -208,8 +208,8 @@ def _is_public_ip(raw_addr: str) -> ipaddress.IPv4Address | ipaddress.IPv6Addres
     return ip
 
 
-def _validate_and_resolve_url(url: str) -> tuple[urllib.parse.ParseResult, str]:
-    """Validate URL scheme, resolve DNS once, and return (parsed, pinned_ip)."""
+def _resolve_validated_ips(url: str) -> tuple[urllib.parse.ParseResult, List[str]]:
+    """Validate URL scheme, resolve DNS once, and return (parsed, ipv4_first_public_ips)."""
     parsed = urllib.parse.urlparse(url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("僅支援 http:// 或 https:// 公開網址")
@@ -224,16 +224,42 @@ def _validate_and_resolve_url(url: str) -> tuple[urllib.parse.ParseResult, str]:
     except socket.gaierror as exc:
         raise ValueError(f"無法解析網域名稱：{host}") from exc
 
-    pinned_ip: str | None = None
+    v4_ips: List[str] = []
+    v6_ips: List[str] = []
+    seen: set[str] = set()
     for _, _, _, _, sockaddr in infos:
         ip = _is_public_ip(sockaddr[0])
-        if pinned_ip is None:
-            pinned_ip = str(ip)
+        ip_str = str(ip)
+        if ip_str in seen:
+            continue
+        seen.add(ip_str)
+        if isinstance(ip, ipaddress.IPv4Address):
+            v4_ips.append(ip_str)
+        else:
+            v6_ips.append(ip_str)
 
-    if pinned_ip is None:
+    ordered_ips = v4_ips + v6_ips
+    if not ordered_ips:
         raise ValueError(f"無法解析網域名稱：{host}")
 
-    return parsed, pinned_ip
+    return parsed, ordered_ips
+
+
+def _validate_and_resolve_url(url: str) -> tuple[urllib.parse.ParseResult, str]:
+    """Validate URL scheme, resolve DNS once, and return (parsed, primary_pinned_ip)."""
+    parsed, ips = _resolve_validated_ips(url)
+    return parsed, ips[0]
+
+
+_DEFAULT_VALIDATE_AND_RESOLVE_URL = _validate_and_resolve_url
+
+
+def _resolve_pinned_candidates(url: str) -> tuple[urllib.parse.ParseResult, List[str]]:
+    """Return validated IP list, honoring test monkeypatches on _validate_and_resolve_url."""
+    if _validate_and_resolve_url is _DEFAULT_VALIDATE_AND_RESOLVE_URL:
+        return _resolve_validated_ips(url)
+    parsed, ip = _validate_and_resolve_url(url)
+    return parsed, ([ip] if isinstance(ip, str) else list(ip))
 
 
 def _validate_public_url(url: str) -> urllib.parse.ParseResult:
@@ -245,41 +271,101 @@ def _validate_public_url(url: str) -> urllib.parse.ParseResult:
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Re-validate every HTTP redirect target against SSRF rules and cap hops."""
 
-    def __init__(self, pinned_ips: dict[tuple[str, int], str] | None = None, max_redirects: int = 3):
+    def __init__(
+        self,
+        pinned_ips: dict[tuple[str, int], List[str] | str] | None = None,
+        max_redirects: int = 3,
+        deadline: Optional[float] = None,
+    ):
         super().__init__()
         self._pinned_ips = pinned_ips
         self._max_redirects = max_redirects
         self._redirect_count = 0
+        self._deadline = deadline
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         self._redirect_count += 1
         if self._redirect_count > self._max_redirects:
             raise PermissionError("重導向次數過多，已中止擷取")
-        parsed, ip = _validate_and_resolve_url(newurl)
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            raise TimeoutError("External fetch deadline exceeded")
+        parsed, ips = _resolve_pinned_candidates(newurl)
         if self._pinned_ips is not None:
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
-            self._pinned_ips[(parsed.hostname.lower(), port)] = ip
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+            self._pinned_ips[(parsed.hostname.lower(), port)] = ips
+        next_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if next_req is not None and self._deadline is not None:
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("External fetch deadline exceeded")
+            prev_timeout = getattr(next_req, "timeout", None)
+            next_req.timeout = remaining if prev_timeout is None else min(float(prev_timeout), remaining)
+        return next_req
 
 
-def _build_pinned_opener(pinned_ips: dict[tuple[str, int], str]) -> urllib.request.OpenerDirector:
-    """Build a urllib opener that connects directly to validated IPs (prevents DNS rebinding)."""
+def _connect_pinned_candidates(
+    candidates: List[str] | str,
+    port: int,
+    timeout: float | None,
+    source_address,
+    *,
+    deadline: Optional[float] = None,
+    per_ip_cap: float = 4.0,
+):
+    ips = [candidates] if isinstance(candidates, str) else list(candidates)
+    if not ips:
+        raise PermissionError("Missing pinned IP for target host")
+    last_err: OSError | None = None
+    for ip_str in ips:
+        attempt_timeout = timeout
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("External fetch deadline exceeded")
+            attempt_timeout = remaining if attempt_timeout is None else min(float(attempt_timeout), remaining)
+        if len(ips) > 1 and per_ip_cap > 0:
+            attempt_timeout = per_ip_cap if attempt_timeout is None else min(float(attempt_timeout), per_ip_cap)
+        try:
+            return socket.create_connection((ip_str, port), attempt_timeout, source_address)
+        except OSError as exc:
+            last_err = exc
+    raise last_err if last_err is not None else OSError("Failed to connect to pinned host")
+
+
+def _build_pinned_opener(
+    pinned_ips: dict[tuple[str, int], List[str] | str],
+    *,
+    deadline: Optional[float] = None,
+) -> urllib.request.OpenerDirector:
+    """Build a urllib opener connecting directly to validated public IPs without proxy bypass."""
     import http.client
     import ssl
 
     class _PinnedHTTPConnection(http.client.HTTPConnection):
         def connect(self) -> None:
-            target_ip = pinned_ips.get((self.host.lower(), self.port))
-            if not target_ip:
+            candidates = pinned_ips.get((self.host.lower(), self.port))
+            if not candidates:
                 raise PermissionError("Missing pinned IP for target host")
-            self.sock = socket.create_connection((target_ip, self.port), self.timeout, self.source_address)
+            self.sock = _connect_pinned_candidates(
+                candidates,
+                self.port,
+                self.timeout,
+                self.source_address,
+                deadline=deadline,
+            )
 
     class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         def connect(self) -> None:
-            target_ip = pinned_ips.get((self.host.lower(), self.port))
-            if not target_ip:
+            candidates = pinned_ips.get((self.host.lower(), self.port))
+            if not candidates:
                 raise PermissionError("Missing pinned IP for target host")
-            sock = socket.create_connection((target_ip, self.port), self.timeout, self.source_address)
+            sock = _connect_pinned_candidates(
+                candidates,
+                self.port,
+                self.timeout,
+                self.source_address,
+                deadline=deadline,
+            )
             self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
     class _PinnedHTTPHandler(urllib.request.HTTPHandler):
@@ -294,8 +380,25 @@ def _build_pinned_opener(pinned_ips: dict[tuple[str, int], str]) -> urllib.reque
             return self.do_open(_PinnedHTTPSConnection, req, context=self._context)
 
     return urllib.request.build_opener(
-        _PinnedHTTPHandler(), _PinnedHTTPSHandler(), _SafeRedirectHandler(pinned_ips)
+        urllib.request.ProxyHandler({}),
+        _PinnedHTTPHandler(),
+        _PinnedHTTPSHandler(),
+        _SafeRedirectHandler(pinned_ips, deadline=deadline),
     )
+
+
+_DEFAULT_BUILD_PINNED_OPENER = _build_pinned_opener
+
+
+def _open_pinned_opener(
+    pinned_ips: dict[tuple[str, int], List[str] | str],
+    *,
+    deadline: Optional[float] = None,
+) -> urllib.request.OpenerDirector:
+    """Create a pinned opener while preserving tests that monkeypatch _build_pinned_opener(pins)."""
+    if _build_pinned_opener is _DEFAULT_BUILD_PINNED_OPENER:
+        return _build_pinned_opener(pinned_ips, deadline=deadline)
+    return _build_pinned_opener(pinned_ips)
 
 
 _ALLOWED_CONTENT_TYPES = (
@@ -313,18 +416,32 @@ def _read_bounded_stream(
     *,
     exceeded_error: Optional[str] = None,
 ) -> bytes:
-    """Read an HTTP response stream in chunks while enforcing size and deadline limits."""
+    """Read an HTTP response stream in chunks while enforcing size and socket deadlines."""
     chunks: List[bytes] = []
     total = 0
     chunk_size = 16_384
+    reader = getattr(resp, "read1", resp.read)
+    raw_sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
     while True:
-        if deadline is not None and time.monotonic() > deadline:
-            raise TimeoutError("External fetch deadline exceeded")
+        if deadline is not None:
+            remaining_sec = deadline - time.monotonic()
+            if remaining_sec <= 0:
+                raise TimeoutError("External fetch deadline exceeded")
+            if raw_sock is not None:
+                try:
+                    raw_sock.settimeout(remaining_sec)
+                except OSError:
+                    pass
         remaining = max_bytes - total
         to_read = min(chunk_size, remaining) if exceeded_error is None else min(chunk_size, remaining + 1)
         if to_read <= 0:
             break
-        part = resp.read(to_read)
+        used_unbounded_read = False
+        try:
+            part = reader(to_read)
+        except TypeError:
+            part = reader()
+            used_unbounded_read = True
         if not part:
             break
         total += len(part)
@@ -334,7 +451,7 @@ def _read_bounded_stream(
             chunks.append(part[: max_bytes - (total - len(part))])
             break
         chunks.append(part)
-        if exceeded_error is None and total >= max_bytes:
+        if used_unbounded_read or (exceeded_error is None and total >= max_bytes):
             break
     return b"".join(chunks)
 
@@ -350,11 +467,11 @@ def _http_get_bytes(
     remaining = read_deadline - time.monotonic()
     if remaining <= 0:
         raise TimeoutError("External fetch deadline exceeded")
-    effective_timeout = min(effective_timeout, max(1.0, remaining))
+    effective_timeout = min(effective_timeout, remaining)
 
-    parsed, pinned_ip = _validate_and_resolve_url(url)
+    parsed, pinned_ips = _resolve_pinned_candidates(url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    opener = _build_pinned_opener({(parsed.hostname.lower(), port): pinned_ip})
+    opener = _open_pinned_opener({(parsed.hostname.lower(), port): pinned_ips}, deadline=read_deadline)
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "LaoMaVibePodcast/0.3.0 (+https://github.com/tonnychiulab/vibe-podcast)"},
