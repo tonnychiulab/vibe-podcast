@@ -1,0 +1,22 @@
+# Cloudflare Tunnel configuration template for 老馬麵攤 (vibe-podcast)
+# Copy to ~/.cloudflared/config.yml and replace <TUNNEL_UUID> and hostname.
+#
+# Quick setup:
+#   brew install cloudflared
+#   cloudflared tunnel login
+#   cloudflared tunnel create vibe-podcast
+#   cloudflared tunnel route dns vibe-podcast podcast.example.com
+#   cloudflared tunnel --config ~/.cloudflared/config.yml run vibe-podcast
+
+tunnel: <TUNNEL_UUID>
+credentials-file: ~/.cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: podcast.example.com
+    service: http://127.0.0.1:8765
+    originRequest:
+      # Keep SSE progress stream (/api/generate/stream) unbuffered and allow long TTS runs
+      disableChunkedEncoding: false
+      connectTimeout: 30s
+      noHappyEyeballs: true
+  - service: http_status:404

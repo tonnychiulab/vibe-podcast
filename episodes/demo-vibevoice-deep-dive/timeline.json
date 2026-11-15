@@ -1,0 +1,135 @@
+{
+  "episode_id": "demo-vibevoice-deep-dive",
+  "title": "深夜麵攤聊架構：微軟 VibeVoice 憑什麼把九十分鐘 Podcast 塞進普通大模型？",
+  "summary": "志明與春嬌在深夜麵攤邊吃麵邊拆解微軟開源的 VibeVoice，聊聊 7.5 Hz 超低採樣率與次詞擴散模型如何顛覆長篇多角色語音生成。",
+  "host_a": "志明",
+  "host_b": "春嬌",
+  "guest_name": null,
+  "interview_format": "noodle_chat",
+  "engine": "edge_dialogue",
+  "audio_path": "episodes/demo-vibevoice-deep-dive/podcast.mp3",
+  "timeline_path": "episodes/demo-vibevoice-deep-dive/timeline.json",
+  "duration_sec": 151.424,
+  "segments": [
+    {
+      "index": 0,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "老闆再來一碗牛肉麵加蛋！春嬌妳有沒有試過用 AI 生長篇 Podcast，每次只要超過十分鐘，聲音就開始走音變形，最後根本像兩個機器人在念經。",
+      "cue": "enthusiastic",
+      "chapter": "hook",
+      "start_sec": 0.0,
+      "end_sec": 12.504
+    },
+    {
+      "index": 1,
+      "speaker": "Speaker 2",
+      "speaker_name": "春嬌",
+      "text": "那很正常啊，傳統語音模型一秒要塞五、六十個 token，就像叫你邊吞拉麵邊背字典，記憶體塞爆之後邏輯當然徹底打架。",
+      "cue": "thoughtful",
+      "chapter": "hook",
+      "start_sec": 12.784,
+      "end_sec": 23.656
+    },
+    {
+      "index": 2,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "原來是記憶體直接被塞滿喔！那微軟最新開源的 VibeVoice 到底動了什麼手腳，居然號稱可以順暢聊完九十分鐘？",
+      "cue": "curious",
+      "chapter": "deep_dive",
+      "start_sec": 23.936,
+      "end_sec": 33.656
+    },
+    {
+      "index": 3,
+      "speaker": "Speaker 2",
+      "speaker_name": "春嬌",
+      "text": "關鍵在於他們把語音 Tokenizer 壓到極致的 7.5 Hz，相當於一秒只要處理七個半 token。這就像把一整碗牛肉麵濃縮成一顆湯塊，九十分鐘對話只要四萬多個 token，隨便塞進一般 LLM 都游刃有餘。",
+      "cue": "animated",
+      "chapter": "deep_dive",
+      "start_sec": 33.936,
+      "end_sec": 51.264
+    },
+    {
+      "index": 4,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "等一下，把音訊壓縮八十倍，那一秒只有七個半點，講話不會變成分辨率超低的電音嗎？人類說話的小碎氣跟笑聲怎麼可能留得住？",
+      "cue": "surprised",
+      "chapter": "deep_dive",
+      "start_sec": 51.544,
+      "end_sec": 62.68
+    },
+    {
+      "index": 5,
+      "speaker": "Speaker 2",
+      "speaker_name": "春嬌",
+      "text": "這就是他們的第二招 Next-Token Diffusion 架構了。大腦用 Qwen2.5 當導演負責理解對話流與輪流接話，旁邊再配一個超輕量的小型 Diffusion 模組，專門幫忙把呼吸聲、微小語調甚至笑聲細節給精準還原。",
+      "cue": "thoughtful",
+      "chapter": "deep_dive",
+      "start_sec": 62.96,
+      "end_sec": 80.168
+    },
+    {
+      "index": 6,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "所以就像導演只要在分鏡表上寫個會心一笑，後面的特效師就會自動渲染出最逼真的呼吸跟笑聲細節，這招真的很聰明！",
+      "cue": "excited",
+      "chapter": "deep_dive",
+      "start_sec": 80.448,
+      "end_sec": 90.96
+    },
+    {
+      "index": 7,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "不過老實講，聽起來很神，但在現實工程落地時，這套 Next-Token Diffusion 真的不需要扛一整排昂貴的 GPU 算力嗎？",
+      "cue": "skeptical",
+      "chapter": "challenge",
+      "start_sec": 91.24,
+      "end_sec": 100.408
+    },
+    {
+      "index": 8,
+      "speaker": "Speaker 2",
+      "speaker_name": "春嬌",
+      "text": "你問到痛點了。雖然 Diffusion 模組只有幾千萬參數，但擴散去噪本質上需要多步迭代，即時推論延遲肯定比單純一次到位的架構吃緊，拿去做低延遲即時通話就會很吃力。",
+      "cue": "serious",
+      "chapter": "challenge",
+      "start_sec": 100.688,
+      "end_sec": 116.144
+    },
+    {
+      "index": 9,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "而且長篇多人對話要是不小心搶話，或者情緒張力突然拉高，這套超低採樣率架構在極端邊界條件下，音色穩定度依然需要好好被檢驗。",
+      "cue": "thoughtful",
+      "chapter": "challenge",
+      "start_sec": 116.424,
+      "end_sec": 128.136
+    },
+    {
+      "index": 10,
+      "speaker": "Speaker 2",
+      "speaker_name": "春嬌",
+      "text": "所以我給的第一句總結是：別再拿短跑的鞋子去跑語音馬拉松，超低採樣率搭配擴散還原，才是長語音生成的破局之道。",
+      "cue": "confident",
+      "chapter": "takeaway",
+      "start_sec": 128.416,
+      "end_sec": 139.168
+    },
+    {
+      "index": 11,
+      "speaker": "Speaker 1",
+      "speaker_name": "志明",
+      "text": "我的實戰心得就是：工程沒有銀彈，低延遲對話選串流架構，高保真長篇創作就大膽擁抱低頻 Tokenizer 吧！好啦老闆，豆干海帶再切兩盤！",
+      "cue": "playful",
+      "chapter": "takeaway",
+      "start_sec": 139.448,
+      "end_sec": 151.424
+    }
+  ]
+}

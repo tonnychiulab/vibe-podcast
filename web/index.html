@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🍜 老馬麵攤 — AI 雙人技術 Podcast 工作室</title>
+  <meta name="description" content="老馬麵攤出品：將技術文章、論文筆記與 Hacker News 討論端上桌，變成一搭一唱的雙人技術 Podcast，搭配即時音訊波形與互動逐字稿。" />
+  <meta name="keywords" content="老馬麵攤, VibeVoice, Microsoft Research, AI Podcast, 雙人對話, 技術播客" />
+  <meta name="theme-color" content="#141414" />
+  <meta property="og:title" content="🍜 老馬麵攤 — AI 雙人技術 Podcast 工作室" />
+  <meta property="og:description" content="老馬麵攤結合 Microsoft Research VibeVoice 技術靈感打造的雙人技術播客工作室。" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23141414'/%3E%3Crect x='14' y='14' width='16' height='16' fill='%23f25022'/%3E%3Crect x='34' y='14' width='16' height='16' fill='%237fba00'/%3E%3Crect x='14' y='34' width='16' height='16' fill='%2300a4ef'/%3E%3Crect x='34' y='34' width='16' height='16' fill='%23ffb900'/%3E%3C/svg%3E" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23141414'/%3E%3Crect x='14' y='14' width='16' height='16' fill='%23f25022'/%3E%3Crect x='34' y='14' width='16' height='16' fill='%237fba00'/%3E%3Crect x='14' y='34' width='16' height='16' fill='%2300a4ef'/%3E%3Crect x='34' y='34' width='16' height='16' fill='%23ffb900'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app-shell" class="app-shell">
+    <aside id="sidebar" class="sidebar">
+      <div class="brand">
+        <div class="brand-top">
+          <span id="brand-badge" class="brand-badge">🍜 老馬麵攤 STUDIO</span>
+          <div class="brand-top-actions">
+            <span id="app-version" class="version-badge">v0.3.0</span>
+            <button id="btn-open-prefs" type="button" class="btn-icon-pill" aria-haspopup="dialog" aria-controls="prefs-modal" title="偏好設定">⚙️</button>
+          </div>
+        </div>
+        <div class="mode-switch" role="tablist" aria-label="Workspace Mode">
+          <button id="mode-listen" type="button" class="mode-btn" role="tab" aria-selected="false">🎧 收聽模式</button>
+          <button id="mode-studio" type="button" class="mode-btn active" role="tab" aria-selected="true">🎛️ 製作模式</button>
+        </div>
+      </div>
+
+      <section id="panel-generate" class="panel">
+        <h2 id="sec-generate">✨ 煮一碗新單集</h2>
+        <div class="source-tabs" role="tablist">
+          <button id="tab-src-text" type="button" class="source-tab active" role="tab" aria-selected="true" data-source-tab="text">📝 貼文 / 檔案</button>
+          <button id="tab-src-url" type="button" class="source-tab" role="tab" aria-selected="false" data-source-tab="url">🌐 網址</button>
+          <button id="tab-src-report" type="button" class="source-tab" role="tab" aria-selected="false" data-source-tab="report">📂 研究報告</button>
+        </div>
+        <div id="pane-src-text" class="field">
+          <div class="panel-head-row">
+            <label id="lbl-source" for="source-text">技術文章或筆記內容</label>
+            <button id="btn-upload-source" type="button" class="btn-secondary">📄 上傳檔案 (.md/.txt/.pdf)</button>
+            <input id="source-file-input" type="file" accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf" hidden />
+          </div>
+          <textarea id="source-text" rows="5" placeholder="貼上你想變成雙人 Podcast 的技術文章、論文摘要或筆記，或拖放 .md/.txt/.pdf 檔案到此..."></textarea>
+          <div id="source-stats" class="source-stats">0 字元</div>
+          <div id="source-override-hint" class="source-override-hint" hidden>提示：已填寫網址或選擇報告時，將優先使用該來源並忽略下方貼上的文字。</div>
+        </div>
+        <div id="pane-src-url" class="field" hidden>
+          <label id="lbl-url" for="source-url">🌐 貼上網址（支援 Hacker News / 技術文章）</label>
+          <input id="source-url" type="url" placeholder="https://news.ycombinator.com/item?id=... 或任意技術文章網址" />
+        </div>
+        <div id="pane-src-report" class="field" hidden>
+          <label id="lbl-report" for="report-select">匯入研究報告 (.md)</label>
+          <select id="report-select">
+            <option id="opt-manual" value="">— 手動貼上文章 / 技術筆記 —</option>
+          </select>
+        </div>
+        <div class="field">
+          <span id="lbl-format" class="field-label">訪談風格結構</span>
+          <input id="format-select" type="hidden" value="noodle_chat" />
+          <div id="format-grid" class="format-grid" role="group" aria-label="Interview Format"></div>
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <span id="lbl-lang" class="field-label">對話語系</span>
+            <input id="lang-select" type="hidden" value="zh-TW" />
+            <div class="lang-switch full-width" role="group" aria-label="Audio Language">
+              <button type="button" class="lang-btn audio-lang-btn active" data-audio-lang="zh-TW" aria-pressed="true">繁體中文</button>
+              <button type="button" class="lang-btn audio-lang-btn" data-audio-lang="en-US" aria-pressed="false">English</button>
+            </div>
+          </div>
+          <div class="field">
+            <label id="lbl-turns" for="turns-input">對話輪數</label>
+            <input id="turns-input" type="number" min="4" max="40" value="12" />
+          </div>
+        </div>
+        <div class="field">
+          <button id="summary-role-settings" type="button" class="advanced-tab full-width" data-drawer="drawer-role-settings" aria-expanded="false">🎭 來賓與必問（選填）</button>
+          <div id="drawer-role-settings" class="advanced-drawer" hidden>
+            <div class="field">
+              <label id="lbl-guest" for="guest-name">特別來賓（選填）</label>
+              <input id="guest-name" type="text" placeholder="例如：Dr. Lin（留空則為雙人）" />
+            </div>
+            <div class="field">
+              <label id="lbl-focus" for="focus-questions">本集必問問題（選填，一行一題）</label>
+              <textarea id="focus-questions" rows="2" placeholder="例如：這套架構的記憶體成本高嗎？"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="gen-actions">
+          <button id="generate-btn" class="btn-primary">🔥 上菜！生成雙人 Podcast</button>
+        </div>
+        <div id="gen-status" class="status-msg" aria-live="polite"></div>
+      </section>
+
+      <section class="panel episodes-panel">
+        <h2 id="sec-episodes">📻 已上菜單集</h2>
+        <ul id="episode-list" class="episode-list"></ul>
+      </section>
+
+      <footer class="credits-footer">
+        <span id="credits-prefix">語音技術靈感與核心架構致謝：</span>
+        <a id="credits-link" href="https://github.com/microsoft/VibeVoice" target="_blank" rel="noopener noreferrer">Microsoft Research — VibeVoice</a>
+      </footer>
+    </aside>
+
+    <main class="stage">
+      <header class="stage-header">
+        <div>
+          <div class="stage-top-bar">
+            <button id="btn-toggle-sidebar" type="button" class="btn-secondary btn-sm" aria-controls="sidebar" aria-expanded="true">⟨ 收合側欄</button>
+            <span id="ep-engine" class="pill">READY</span>
+            <div class="lang-switch stage-lang-switch" role="group" aria-label="UI Language">
+              <button id="btn-lang-zh" type="button" class="lang-btn active" data-ui-lang="zh-TW">繁體中文</button>
+              <button id="btn-lang-en" type="button" class="lang-btn" data-ui-lang="en-US">English</button>
+            </div>
+          </div>
+          <h2 id="ep-title">請選擇左側單集，或貼上文章讓老馬麵攤幫你煮第一集 Podcast</h2>
+          <p id="ep-summary" class="ep-summary">支援即時音訊波形視覺化、雙主持人說話狀態同步，以及點擊逐字稿任意句跳轉播放。</p>
+        </div>
+      </header>
+
+      <section class="hosts-deck">
+        <div id="card-host-a" class="host-card host-a">
+          <div class="avatar">志</div>
+          <div class="host-meta">
+            <span id="tag-speaker-a" class="speaker-tag">主講人 1 · 男聲</span>
+            <h3 id="label-host-a">志明</h3>
+            <span id="role-a" class="role-desc">好奇務實的全端工程師</span>
+          </div>
+          <div class="live-dot">ON AIR</div>
+        </div>
+        <div id="card-host-b" class="host-card host-b">
+          <div class="avatar">春</div>
+          <div class="host-meta">
+            <span id="tag-speaker-b" class="speaker-tag">主講人 2 · 女聲</span>
+            <h3 id="label-host-b">春嬌</h3>
+            <span id="role-b" class="role-desc">資深架構師 / 技術吐槽役</span>
+          </div>
+          <div class="live-dot">ON AIR</div>
+        </div>
+        <div id="card-host-c" class="host-card host-c" hidden>
+          <div class="avatar guest">賓</div>
+          <div class="host-meta">
+            <span id="tag-speaker-c" class="speaker-tag">主講人 3 · 來賓</span>
+            <h3 id="label-host-c">來賓</h3>
+            <span id="role-c" class="role-desc">本集特別來賓</span>
+          </div>
+          <div class="live-dot">ON AIR</div>
+        </div>
+      </section>
+
+      <section class="visualizer-box">
+        <div class="waveform-wrap">
+          <canvas id="waveform-canvas" width="900" height="140"></canvas>
+          <div id="waveform-tooltip" class="waveform-tooltip" hidden></div>
+        </div>
+        <div class="player-bar">
+          <audio id="audio-player" controls crossorigin="anonymous"></audio>
+          <div class="player-settings-wrap">
+            <button id="btn-player-settings" type="button" class="btn-secondary btn-settings" aria-expanded="false" title="Playback Settings">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              <span id="speed-badge" class="speed-badge">1.0x</span>
+            </button>
+            <div id="player-settings-menu" class="player-settings-menu" hidden>
+              <div class="settings-section">
+                <div id="lbl-player-speed" class="settings-label">播放速度</div>
+                <div class="speed-pills">
+                  <button type="button" class="speed-pill" data-speed="0.75" aria-pressed="false">0.75x</button>
+                  <button type="button" class="speed-pill active" data-speed="1" aria-pressed="true">1.0x</button>
+                  <button type="button" class="speed-pill" data-speed="1.25" aria-pressed="false">1.25x</button>
+                  <button type="button" class="speed-pill" data-speed="1.5" aria-pressed="false">1.5x</button>
+                  <button type="button" class="speed-pill" data-speed="2" aria-pressed="false">2.0x</button>
+                </div>
+              </div>
+              <div class="settings-section">
+                <div id="lbl-transcript-size" class="settings-label">逐字稿字級</div>
+                <div class="font-size-pills" role="group" aria-label="Transcript Font Size">
+                  <button id="btn-fs-sm" type="button" class="font-size-pill" data-font-size="13px" aria-pressed="false">小</button>
+                  <button id="btn-fs-md" type="button" class="font-size-pill active" data-font-size="14px" aria-pressed="true">標準</button>
+                  <button id="btn-fs-lg" type="button" class="font-size-pill" data-font-size="16px" aria-pressed="false">大</button>
+                </div>
+              </div>
+              <label class="chk-inline settings-row">
+                <input id="chk-loop" type="checkbox" />
+                <span id="lbl-player-loop">單集循環播放</span>
+              </label>
+              <div id="lbl-player-shortcuts" class="settings-hint">快捷鍵：Space 播放/暫停 · ←/→ ±10 秒</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="transcript-box">
+        <div class="transcript-header">
+          <h3 id="transcript-title">💬 互動式逐字稿（點擊任一句即可跳轉播放）</h3>
+          <div class="transcript-actions">
+            <button id="btn-auto-follow" type="button" class="btn-secondary active" aria-pressed="true">📌 自動跟隨</button>
+            <div class="export-menu-wrap">
+              <button id="btn-export-menu" type="button" class="btn-secondary" aria-expanded="false">📤 匯出 / RSS ▾</button>
+              <div id="export-dropdown" class="export-dropdown" hidden>
+                <button id="btn-open-rss" type="button" class="btn-secondary">📡 RSS Feed</button>
+                <button id="btn-export-shownotes" type="button" class="btn-secondary" hidden>📝 Show Notes</button>
+                <button id="btn-export-srt" type="button" class="btn-secondary" hidden>💾 下載 SRT</button>
+              </div>
+            </div>
+            <span id="time-readout" class="time-readout">00:00 / 00:00</span>
+          </div>
+        </div>
+        <div id="chapter-pills" class="chapter-pills"></div>
+        <div id="transcript-list" class="transcript-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="prefs-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="prefs-modal-title" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="prefs-modal-title">⚙️ 偏好設定（自動儲存）</h3>
+        <button id="btn-close-prefs" type="button" class="btn-icon-pill" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="template-actions">
+          <button id="btn-import-tpl" type="button" class="btn-secondary">📥 匯入範本</button>
+          <button id="btn-download-tpl" type="button" class="btn-secondary">📋 範例 JSON</button>
+          <input id="tpl-file-input" type="file" accept=".json,application/json" hidden />
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label id="lbl-host-a" for="host-a">主持人 A</label>
+            <input id="host-a" type="text" value="志明" />
+          </div>
+          <div class="field">
+            <label id="lbl-host-b" for="host-b">主持人 B</label>
+            <input id="host-b" type="text" value="春嬌" />
+          </div>
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label id="lbl-backend" for="backend-select">LLM 後端</label>
+            <select id="backend-select">
+              <option value="auto">auto (訂閱授權 agy → 本機 ollama)</option>
+              <option value="agy">agy CLI (訂閱授權)</option>
+              <option value="ollama">ollama (本機零金鑰)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label id="lbl-model" for="model-input">指定模型（選填）</label>
+            <input id="model-input" type="text" placeholder="留空使用預設（Ollama 例：qwen2.5:14b）" />
+          </div>
+        </div>
+        <div class="field">
+          <label id="lbl-long-text-mode" for="long-text-mode">長文處理策略（超過 12,000 字元）</label>
+          <select id="long-text-mode">
+            <option id="opt-long-map-reduce" value="map_reduce">Map-Reduce 分段重點萃取（保留全文脈絡）</option>
+            <option id="opt-long-truncate" value="truncate">直接截斷前 12,000 字元（省額度）</option>
+          </select>
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label id="lbl-voice-1" for="voice-speaker-1">Speaker 1 音色</label>
+            <select id="voice-speaker-1"></select>
+          </div>
+          <div class="field">
+            <label id="lbl-voice-2" for="voice-speaker-2">Speaker 2 音色</label>
+            <select id="voice-speaker-2"></select>
+          </div>
+        </div>
+        <div class="field">
+          <label id="lbl-voice-3" for="voice-speaker-3">Speaker 3 來賓音色</label>
+          <select id="voice-speaker-3"></select>
+        </div>
+        <div class="row-2">
+          <label class="chk-inline"><input id="chk-loudnorm" type="checkbox" checked /> <span id="lbl-loudnorm-text">EBU R128 響度正規化</span></label>
+          <label class="chk-inline"><input id="chk-sfx" type="checkbox" /> <span id="lbl-sfx-text">章節轉場音效</span></label>
+        </div>
+        <div class="field">
+          <label class="chk-inline"><input id="chk-show-memory" type="checkbox" checked /> <span id="lbl-show-memory-text">啟用節目記憶 / Show Bible</span></label>
+        </div>
+        <details id="show-bible-details" class="show-bible-details">
+          <summary id="lbl-show-bible-summary">📖 節目聖經與跨集記憶設定 (Show Bible)</summary>
+          <div class="show-bible-body">
+            <div class="field">
+              <label id="lbl-sb-show-name" for="sb-show-name">節目名稱</label>
+              <input id="sb-show-name" type="text" maxlength="80" />
+            </div>
+            <div class="field">
+              <label id="lbl-sb-host-a-persona" for="sb-host-a-persona">Speaker 1 長期人設（麵攤閒聊風）</label>
+              <textarea id="sb-host-a-persona" rows="2" maxlength="300"></textarea>
+            </div>
+            <div class="field">
+              <label id="lbl-sb-host-b-persona" for="sb-host-b-persona">Speaker 2 長期人設（麵攤閒聊風）</label>
+              <textarea id="sb-host-b-persona" rows="2" maxlength="300"></textarea>
+            </div>
+            <div class="field">
+              <label id="lbl-sb-callbacks" for="sb-callbacks">招牌口頭禪 / 老梗（每行一句）</label>
+              <textarea id="sb-callbacks" rows="2"></textarea>
+            </div>
+            <div class="field">
+              <label id="lbl-sb-cliches" for="sb-cliches">嚴禁出現的 AI 罐頭詞（每行一詞）</label>
+              <textarea id="sb-cliches" rows="2"></textarea>
+            </div>
+            <div class="show-bible-actions">
+              <button id="btn-save-show-bible" type="button" class="btn-secondary btn-sm">💾 儲存 Show Bible</button>
+              <span id="sb-status" class="status-msg" aria-live="polite"></span>
+            </div>
+          </div>
+        </details>
+      </div>
+      <div class="modal-foot">
+        <button id="btn-prefs-done" type="button" class="btn-primary btn-sm">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
