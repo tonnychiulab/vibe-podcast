@@ -1,0 +1,1734 @@
+[
+  {
+    "coverage_id": ".github%2Fworkflows%2Fci.yml%23Dependencies%2C%20CI%20and%20startup%20scripts::scripts%2Fserve_studio.sh%20and%20.github%2Fworkflows%2Fci.yml::profile%2Fquick%2Fall-in-scope-subsystems::SUPPLY-CHAIN-AND-RELEASE.md%23Mutable%20and%20unbound%20build%20inputs",
+    "canonical_refs": {
+      "surface": ".github/workflows/ci.yml#Dependencies, CI and startup scripts",
+      "boundary": "scripts/serve_studio.sh and .github/workflows/ci.yml",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "SUPPLY-CHAIN-AND-RELEASE.md#Mutable and unbound build inputs"
+    },
+    "surface": "pyproject.toml, uv.lock, .github/workflows/ci.yml, scripts/* & deploy config examples",
+    "boundary": "Build inputs, CI workflow trust/permissions, env loading & runtime binary/server startup defaults",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Supply chain, CI automation, dependency pinning & operational defaults",
+    "starting_paths": [
+      "pyproject.toml",
+      "uv.lock",
+      ".github/workflows/ci.yml",
+      "scripts/serve_studio.sh",
+      "scripts/generate_demo.py",
+      "deploy/cloudflared.config.yml.example",
+      ".env.example"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Obvious things",
+    "selected_companion_blocks": [
+      "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Dependency source and namespace confusion",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Mutable and unbound build inputs",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Untrusted code in a privileged workflow",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Workflow command and expression confusion",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Universal moves",
+      "SUPPLY-CHAIN-AND-RELEASE.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      },
+      {
+        "block": "SUPPLY-CHAIN-AND-RELEASE.md#Release and update attack classes",
+        "reason": "Repo has no automated release-signing, package-publish, or self-update pipeline"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-dos-supply",
+    "reviewed_paths": [
+      ".env.example",
+      ".github/workflows/ci.yml",
+      ".gitignore",
+      "deploy/cloudflared.config.yml.example",
+      "pyproject.toml",
+      "scripts/generate_demo.py",
+      "scripts/serve_studio.sh",
+      "uv.lock"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "pyproject.toml",
+          "uv.lock"
+        ],
+        "invariant": "All build and runtime dependencies resolve from trusted PyPI sources with pinned lockfile hashes and no git/local-path confusion.",
+        "method": "source",
+        "result": "pyproject.toml declares standard PyPI packages; uv.lock (1888 lines) pins all third-party packages to https://pypi.org/simple and files.pythonhosted.org with sha256 hashes, with only the local project entry (vibe-podcast) marked editable = \".\".",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          ".github/workflows/ci.yml"
+        ],
+        "invariant": "CI workflows do not run untrusted pull_request code with protected secrets, write/publish tokens, or privileged release consumers.",
+        "method": "source",
+        "result": ".github/workflows/ci.yml triggers on push and pull_request to main, runs pytest -v on ubuntu-latest, references no repository secrets, and has no release/publish/signing job. Floating @v4 action tags, omitted explicit permissions block, and `uv sync --extra dev` without `--frozen` have no downstream privileged release sink in source and are recorded as hardening.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "scripts/serve_studio.sh",
+          "scripts/generate_demo.py",
+          "deploy/cloudflared.config.yml.example",
+          ".env.example",
+          ".gitignore"
+        ],
+        "invariant": "Startup scripts, deployment examples, and tracked configuration files contain no hardcoded credentials, unsafe eval/exec, or unsafe exposure defaults.",
+        "method": "source",
+        "result": "No hardcoded secrets, API keys, or tokens exist in tracked files; .gitignore excludes .env, .env.*, reports/, and episodes/* (except demo). scripts/serve_studio.sh defaults HOST=127.0.0.1 and PORT=8765 with --forwarded-allow-ips=\"127.0.0.1\"; deploy/cloudflared.config.yml.example and .env.example contain only placeholders.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening_notes": [
+      "In .github/workflows/ci.yml, pin actions/checkout and astral-sh/setup-uv to full commit SHAs, add explicit `permissions: contents: read`, and run `uv sync --locked --extra dev` (and `uv run --frozen --no-sync` in scripts/serve_studio.sh) to prevent lockfile drift.",
+      "In vibe_podcast/routes/studio.py (_synthesize_from_request) and vibe_podcast/routes/episodes.py (update_episode_turn), catch subprocess.CalledProcessError and subprocess.TimeoutExpired from audio_fx.py so ffmpeg/ffprobe failures return structured HTTP 502/504 errors instead of unhandled 500s; additionally serialize per-episode edits in resynthesize_turn/delete_episode and write timeline.json atomically via tempfile + os.replace to prevent same-admin concurrent corruption.",
+      "In vibe_podcast/connectors.py (MarkdownDirConnector.load_text) and vibe_podcast/show_memory.py (ShowBible), enforce explicit read/item byte caps (e.g., capping .md reads and ShowBible callback/cliche string lengths before writing show_bible.json) to prevent oversized local files from consuming RAM prior to truncation.",
+      "In vibe_podcast/routes/episodes.py (_load_all_timelines), cache parsed episode metadata by directory mtime or paginate /api/episodes so repeated listener/RSS polling does not re-parse every timeline.json on every request."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fauth.py%23GET%20%2F%3Ftoken%3D%20and%20%2Fapi%2F%2A%20auth::vibe_podcast%2Fauth.py%23handle_security_and_auth::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Access%20control",
+    "canonical_refs": {
+      "surface": "vibe_podcast/auth.py#GET /?token= and /api/* auth",
+      "boundary": "vibe_podcast/auth.py#handle_security_and_auth",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "ATTACK-CLASSES.md#Access control"
+    },
+    "surface": "Browser token login (GET /?token=) and /api/* Bearer/Cookie/Query RBAC middleware",
+    "boundary": "Unauthenticated vs Listener vs Admin authentication & role authorization (auth.py, routes/*)",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Access control, browser session/CSRF, cookie transport & token handling",
+    "starting_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+      "WEB-PROTOCOL-AND-AUTH.md#Browser-session attack classes",
+      "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+      "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+      "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+      "WEB-PROTOCOL-AND-AUTH.md#API-key exposure and unsafe transport",
+      "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+      "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      },
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#Federated-identity attack classes",
+        "reason": "No JWT, OAuth/OIDC, or SAML authentication exists in source"
+      },
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#MFA, passkey, and account-transition attack classes",
+        "reason": "No MFA, passkey/WebAuthn, account linking, or password reset flows exist in source"
+      },
+      {
+        "block": "WEB-PROTOCOL-AND-AUTH.md#mTLS peer and application-identity confusion",
+        "reason": "No mTLS client-certificate verification exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-http-auth",
+    "reviewed_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/server.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/server.py"
+        ],
+        "invariant": "Unauthenticated requests to /api/* (except /api/health minimal probe and CORS OPTIONS preflight) are rejected with 401 and cannot bypass middleware via path normalization or middleware ordering.",
+        "method": "source",
+        "result": "handle_security_and_auth gates all /api/* paths (except OPTIONS and /api/health, which independently requires admin role in studio.py:52 for preflight details) before call_next. CORSMiddleware is registered outermost with explicit origin allowlist (_build_allowed_origins, no wildcard with credentials). FastAPI routes do not collapse //api/ paths into /api/ routes.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/routes/episodes.py"
+        ],
+        "invariant": "Listener role (LISTEN_TOKEN) is restricted to read-only GET/HEAD playback, timeline, export, metadata, and RSS endpoints and cannot reach admin mutations, reports, Show Bible, or health preflight; query tokens cannot authenticate as admin on audio/RSS endpoints.",
+        "method": "source",
+        "result": "_is_listener_allowed_api restricts non-admin callers to GET/HEAD on exact _LISTENER_GET_PATHS (/api/meta, /api/episodes, /api/rss-url) and _LISTENER_EPISODE_GET_RE (^/api/episodes/[a-zA-Z0-9_-]+/(?:timeline|audio|srt|shownotes)$). All POST/PUT/DELETE routes and GET /api/reports, /api/show-bible return 403 for listeners. /api/health checks SESSION_TOKEN only (allow_query_token=False). /api/episodes/*/audio and /feed.xml pass allow_query_admin=False.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/routes/episodes.py"
+        ],
+        "invariant": "Cookie-authenticated state-changing endpoints and vp_session cookie scope/transport resist cross-site request forgery and insecure cookie leakage.",
+        "method": "source",
+        "result": "vp_session cookie is set host-only (no Domain attribute), Path=/, HttpOnly, SameSite=Lax, and Secure when _is_https_request() is true. All mutating routes are POST, PUT, or DELETE; SameSite=Lax blocks cross-site requests with cookies, and locked FastAPI 0.162.7 strict_content_type=True requires application/json on JSON POST bodies while CORSMiddleware blocks untrusted origins from preflighted JSON/PUT/DELETE requests. Note: GET /?token=<LISTEN_TOKEN> is a top-level GET that can overwrite an admin cookie to listener (see hardening).",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/auth.py:82-93 (_match_token_role): Encode candidate and expected tokens to UTF-8 bytes before calling hmac.compare_digest; passing a non-ASCII str (e.g., UTF-8 query param or Latin-1 decoded header) raises TypeError (HTTP 500) and skips apply_security_headers.",
+      "vibe_podcast/auth.py:160-177 (handle_security_and_auth): GET /?token=<LISTEN_TOKEN> is a state-changing top-level GET without CSRF protection; an invited listener who knows LISTEN_TOKEN can navigate an admin to /?token=<LISTEN_TOKEN> and downgrade the admin's vp_session cookie to listener (Login CSRF). Exchange tokens via POST /api/login (JSON body) with explicit opaque session IDs and rotation/logout support.",
+      "vibe_podcast/auth.py:163-197: Add Cache-Control: no-store to early-return responses (especially the 302 Set-Cookie redirect on GET /?token= and 401/403 responses) rather than only call_next() responses.",
+      "vibe_podcast/routes/episodes.py:187-200 (_resolve_public_base_url) & vibe_podcast/auth.py:128-138 (_is_https_request): Read request.url.scheme/netloc (populated by uvicorn --proxy-headers --forwarded-allow-ips) or validate Host/X-Forwarded-Host against an explicit allowlist when VIBEPODCAST_PUBLIC_URL is unset, instead of reading raw X-Forwarded-Proto/X-Forwarded-Host headers directly.",
+      "vibe_podcast/routes/episodes.py:101-104 (get_episode_timeline): Listener-accessible /api/episodes/{id}/timeline returns full SynthesisResult including server-side absolute filesystem paths (audio_path, timeline_path); consider stripping or relativizing internal paths in listener responses."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fauth.py%23Pre-auth%2C%20error%20and%20fallback%20availability::vibe_podcast%2Fauth.py%20and%20synthesizer%2Faudio_fx%20fallbacks::profile%2Fquick%2Fall-in-scope-subsystems::RESOURCE-EXHAUSTION-AND-AVAILABILITY.md%23Retry%20storm%20and%20fail-open%20amplification",
+    "canonical_refs": {
+      "surface": "vibe_podcast/auth.py#Pre-auth, error and fallback availability",
+      "boundary": "vibe_podcast/auth.py and synthesizer/audio_fx fallbacks",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Retry storm and fail-open amplification"
+    },
+    "surface": "Unauthenticated static/health/token-exchange paths, TTS/LLM/ffmpeg retry & fallback handlers",
+    "boundary": "Pre-auth work balance, retry/fallback amplification & corrupt state/JSON fatal errors",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Pre-auth imbalance, retry/fallback storms, fatal errors & edge-case availability",
+    "starting_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/synthesizer.py",
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/preflight.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Wildcard",
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Retry storm and fail-open amplification",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Reachable fatal error or deadlock",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-dos-supply",
+    "reviewed_paths": [
+      "pyproject.toml",
+      "tests/test_audit_regressions.py",
+      "tests/test_server_api.py",
+      "uv.lock",
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/auth.py",
+      "vibe_podcast/preflight.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/synthesizer.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/preflight.py"
+        ],
+        "invariant": "Unauthenticated requests cannot trigger expensive parsing, network probes, or directory scans before constant-time token verification.",
+        "method": "source",
+        "result": "handle_security_and_auth validates tokens via hmac.compare_digest before invoking route handlers on /api/* (except /api/health) and /?token=; /api/health immediately returns {\"status\": \"ok\", \"version\": ...} for non-admin callers before calling run_preflight; /feed.xml checks get_auth_role before _load_all_timelines. Corrupt show_bible.json, _custom_presets.json, and timeline.json are caught gracefully without process crash.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/synthesizer.py",
+          "vibe_podcast/audio_fx.py"
+        ],
+        "invariant": "TTS and ffmpeg fallback paths are bounded and cannot amplify a bounded failure into unbounded retries or process deadlocks.",
+        "method": "source",
+        "result": "_edge_tts_to_file tries at most 3 candidate voices x 2 attempts (plus optional macOS say with 30s timeout), _synthesize_edge_dialogue re-synthesizes prior turns at most once per voice fallback step (bounded by fallback list size when turn count is bounded), and merge_turns_to_mp3 falls back at most once from loudnorm to plain mix (120s timeout each).",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/routes/studio.py"
+        ],
+        "invariant": "PDF extraction fails closed when pypdf enforces decompression/safety resource limits rather than failing open to an unbuffered subprocess fallback.",
+        "method": "source",
+        "result": "Failed: upload_source_file catches broad Exception (including pypdf LimitReachedError) at line 240 and falls back to pdftotext with capture_output=True and no stdout byte cap.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-05",
+        "reviewed_paths": [
+          "pyproject.toml",
+          "tests/test_audit_regressions.py",
+          "tests/test_server_api.py",
+          "uv.lock",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/server.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/routes/studio.py:upload_source_file-pypdf-limit-fail-open-pdftotext",
+        "method": "source",
+        "result": "[needs_validation] Source-verified trace in studio.py (lines 182, 240, 259, 274), UploadSourceRequest in schemas.py (line 73), admin-only auth in auth.py (lines 179-197), and pypdf 7.1.0 in uv.lock (line 1293). Target execution blocked by Darwin nested-sandbox policy; kept needs_validation.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vibe_podcast/routes/studio.py:upload_source_file-pypdf-limit-fail-open-pdftotext"
+    ],
+    "unresolved": [],
+    "hardening_notes": [
+      "In .github/workflows/ci.yml, pin actions/checkout and astral-sh/setup-uv to full commit SHAs, add explicit `permissions: contents: read`, and run `uv sync --locked --extra dev` (and `uv run --frozen --no-sync` in scripts/serve_studio.sh) to prevent lockfile drift.",
+      "In vibe_podcast/routes/studio.py (_synthesize_from_request) and vibe_podcast/routes/episodes.py (update_episode_turn), catch subprocess.CalledProcessError and subprocess.TimeoutExpired from audio_fx.py so ffmpeg/ffprobe failures return structured HTTP 502/504 errors instead of unhandled 500s; additionally serialize per-episode edits in resynthesize_turn/delete_episode and write timeline.json atomically via tempfile + os.replace to prevent same-admin concurrent corruption.",
+      "In vibe_podcast/connectors.py (MarkdownDirConnector.load_text) and vibe_podcast/show_memory.py (ShowBible), enforce explicit read/item byte caps (e.g., capping .md reads and ShowBible callback/cliche string lengths before writing show_bible.json) to prevent oversized local files from consuming RAM prior to truncation.",
+      "In vibe_podcast/routes/episodes.py (_load_all_timelines), cache parsed episode metadata by directory mtime or paginate /api/episodes so repeated listener/RSS polling does not re-parse every timeline.json on every request."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fauth.py%23Token%20storage%20and%20comparison::vibe_podcast%2Fauth.py%23_resolve_or_create_token::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Cryptography%20and%20secrets",
+    "canonical_refs": {
+      "surface": "vibe_podcast/auth.py#Token storage and comparison",
+      "boundary": "vibe_podcast/auth.py#_resolve_or_create_token",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "ATTACK-CLASSES.md#Cryptography and secrets"
+    },
+    "surface": "SESSION_TOKEN and LISTEN_TOKEN creation, 0600 file persistence, startup logging & query/RSS links",
+    "boundary": "Secret generation, constant-time comparison, disk permissions & RSS/audio URL token leakage",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Cryptography and secrets lifecycle, comparison & URL token exposure",
+    "starting_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/exporters.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Cryptography and secrets",
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+      "WEB-PROTOCOL-AND-AUTH.md#API-key scope and resource binding",
+      "WEB-PROTOCOL-AND-AUTH.md#API-key exposure and unsafe transport",
+      "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+      "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-http-auth",
+    "reviewed_paths": [
+      "deploy/cloudflared.config.yml.example",
+      "scripts/serve_studio.sh",
+      "vibe_podcast/auth.py",
+      "vibe_podcast/exporters.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/server.py",
+      "web/app.js"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py"
+        ],
+        "invariant": "Tokens are generated from CSPRNG, persisted with 0600 permissions inside 0700 directory, and compared in constant time without auth bypass.",
+        "method": "source",
+        "result": "_load_or_create_token generates tokens via secrets.token_urlsafe(32), creates parent dir with 0o700, opens target with 0o600, and chmods existing files to 0o600. _match_token_role uses hmac.compare_digest; however, passing unencoded str raises TypeError (HTTP 500, fail-closed) if candidate contains non-ASCII characters.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/server.py",
+          "web/app.js"
+        ],
+        "invariant": "High-privilege Admin SESSION_TOKEN is not exposed in URL query strings, HTTP access logs, or application logger output.",
+        "method": "source",
+        "result": "Invariant fails in source: server.py:64 logs plaintext SESSION_TOKEN in an auth URL via logger.info, auth.py:160-174 accepts SESSION_TOKEN via GET /?token= (also used by web/app.js:237 after manual prompt entry) and writes vp_session=<SESSION_TOKEN> on a 302 without Cache-Control: no-store, exposing the persistent non-rotatable admin token in URL query strings and logs.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/exporters.py"
+        ],
+        "invariant": "RSS feed and audio subscription links only embed the read-only LISTEN_TOKEN and never disclose or accept SESSION_TOKEN in query strings.",
+        "method": "source",
+        "result": "/api/rss-url and /feed.xml embed only srv.LISTEN_TOKEN (URL-quoted and XML-attribute escaped in exporters.py:100-104), and both /feed.xml and /api/episodes/*/audio enforce allow_query_admin=False.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-04",
+        "reviewed_paths": [
+          "deploy/cloudflared.config.yml.example",
+          "scripts/serve_studio.sh",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/exporters.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/server.py",
+          "web/app.js"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/auth.py:admin-token-in-query-url-and-logs",
+        "method": "source",
+        "result": "[needs_validation] Source-verified all trace/evidence files and lines (`method: \"source\"`); retained `needs_validation` due to macOS nested sandbox execution blocker and deployment log/proxy retention outside source.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vibe_podcast/auth.py:admin-token-in-query-url-and-logs"
+    ],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/auth.py:82-93 (_match_token_role): Encode candidate and expected tokens to UTF-8 bytes before calling hmac.compare_digest; passing a non-ASCII str (e.g., UTF-8 query param or Latin-1 decoded header) raises TypeError (HTTP 500) and skips apply_security_headers.",
+      "vibe_podcast/auth.py:160-177 (handle_security_and_auth): GET /?token=<LISTEN_TOKEN> is a state-changing top-level GET without CSRF protection; an invited listener who knows LISTEN_TOKEN can navigate an admin to /?token=<LISTEN_TOKEN> and downgrade the admin's vp_session cookie to listener (Login CSRF). Exchange tokens via POST /api/login (JSON body) with explicit opaque session IDs and rotation/logout support.",
+      "vibe_podcast/auth.py:163-197: Add Cache-Control: no-store to early-return responses (especially the 302 Set-Cookie redirect on GET /?token= and 401/403 responses) rather than only call_next() responses.",
+      "vibe_podcast/routes/episodes.py:187-200 (_resolve_public_base_url) & vibe_podcast/auth.py:128-138 (_is_https_request): Read request.url.scheme/netloc (populated by uvicorn --proxy-headers --forwarded-allow-ips) or validate Host/X-Forwarded-Host against an explicit allowlist when VIBEPODCAST_PUBLIC_URL is unset, instead of reading raw X-Forwarded-Proto/X-Forwarded-Host headers directly.",
+      "vibe_podcast/routes/episodes.py:101-104 (get_episode_timeline): Listener-accessible /api/episodes/{id}/timeline returns full SynthesisResult including server-side absolute filesystem paths (audio_path, timeline_path); consider stripping or relativizing internal paths in listener responses."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fconnectors.py%23SSRF%20and%20subprocess%20sinks::vibe_podcast%2Fconnectors.py%23_PinnedHTTPConnection%20and%20subprocess.run%20lists::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Injection",
+    "canonical_refs": {
+      "surface": "vibe_podcast/connectors.py#SSRF and subprocess sinks",
+      "boundary": "vibe_podcast/connectors.py#_PinnedHTTPConnection and subprocess.run lists",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "ATTACK-CLASSES.md#Injection"
+    },
+    "surface": "WebUrlConnector (redirects/HN/DNS pinning), VibeVoice remote URL, Ollama client & CLI subprocesses",
+    "boundary": "Outbound URL/SSRF filtering, DNS pinning, model regex & ffmpeg/pdftotext/say/agy argv sinks",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "SSRF bypass, CLI/argument injection, XML/SRT injection & remote media parsing",
+    "starting_paths": [
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/synthesizer.py",
+      "vibe_podcast/scriptwriter.py",
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/preflight.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+      "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+      "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-files-ssrf",
+    "reviewed_paths": [
+      "README.md",
+      "scripts/generate_demo.py",
+      "tests/test_security.py",
+      "tests/test_synthesizer.py",
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/preflight.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/scriptwriter.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/synthesizer.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/connectors.py"
+        ],
+        "invariant": "WebUrlConnector and _http_get_bytes enforce http/https schemes, reject non-global/loopback/link-local/CGNAT/IPv4-mapped IPs, pin resolved IPs via _PinnedHTTPConnection/_PinnedHTTPSConnection, re-validate up to 3 redirects via _SafeRedirectHandler, check Content-Type, and cap reads to 512000 bytes",
+        "method": "source",
+        "result": "Confirmed in source: _validate_and_resolve_url checks all getaddrinfo sockaddrs with _is_public_ip, _build_pinned_opener connects sockets directly to pinned_ips, _SafeRedirectHandler re-validates every redirect up to 3 hops and updates pinned_ips, and _http_get_bytes checks _ALLOWED_CONTENT_TYPES and reads at most max_bytes.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/synthesizer.py",
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/routes/episodes.py"
+        ],
+        "invariant": "synthesize_podcast remote VibeVoice URL SSRF guard pins DNS, re-validates HTTP redirects, and bounds remote WAV response reads",
+        "method": "source",
+        "result": "Gap identified: synthesize_podcast calls _validate_public_url(resolved_remote) which discards the pinned IP, and _synthesize_vibevoice_remote then calls bare urllib.request.urlopen(req, timeout=300) without IP pinning or _SafeRedirectHandler and writes unbounded resp.read() to podcast.wav; HTTP routes only source resolved_remote from VIBEVOICE_REMOTE_URL, so exploitation depends on deployment/runtime conditions (needs_validation).",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/scriptwriter.py"
+        ],
+        "invariant": "LLM invocation (_call_agy_cli, _call_ollama) validates model names and avoids shell/flag injection in subprocess argv",
+        "method": "source",
+        "result": "Confirmed in source: _validate_model_name enforces ^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$, _call_agy_cli uses subprocess.run with shell=False list and --disable-slash-commands where prompt always begins with non-hyphen Chinese text, and _call_ollama uses operator OLLAMA_BASE_URL with JSON-serialized body.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/synthesizer.py",
+          "vibe_podcast/audio_fx.py",
+          "vibe_podcast/routes/studio.py"
+        ],
+        "invariant": "Audio and PDF subprocess sinks (say, ffmpeg, ffprobe, pdftotext) use shell=False argv lists without interpolating untrusted text into flags or filter_complex expressions",
+        "method": "source",
+        "result": "Confirmed in source: macOS say fallback passes '--' before text, ffmpeg/ffprobe receive validated/generated filesystem paths and integer-only delay/mix parameters in filter_complex, and pdftotext receives a mkstemp .pdf path with explicit -f 1 -l 100 flags.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/preflight.py"
+        ],
+        "invariant": "preflight HTTP probes do not accept unauthenticated or request-supplied URLs",
+        "method": "source",
+        "result": "Confirmed in source: run_preflight only probes operator-configured OLLAMA_BASE_URL and VIBEVOICE_REMOTE_URL when invoked via CLI or admin-authenticated /api/health.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-03",
+        "reviewed_paths": [
+          "README.md",
+          "scripts/generate_demo.py",
+          "tests/test_security.py",
+          "tests/test_synthesizer.py",
+          "vibe_podcast/audio_fx.py",
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/preflight.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/synthesizer.py::_synthesize_vibevoice_remote:redirect-and-dns-pinning-bypass",
+        "method": "source",
+        "result": "[needs_validation] Source-verified all trace and evidence lines across studio.py, synthesizer.py, connectors.py, and episodes.py. Retained needs_validation because target code execution is blocked by host sandbox policy and HTTP routes only source remote_url from the VIBEVOICE_REMOTE_URL env var rather than request payloads.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vibe_podcast/synthesizer.py::_synthesize_vibevoice_remote:redirect-and-dns-pinning-bypass"
+    ],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/preflight.py:141 (_probe_http_ok on VIBEVOICE_REMOTE_URL) uses bare urllib.request.urlopen without _validate_public_url or redirect/DNS-pinning guards when VIBEPODCAST_ALLOW_PRIVATE_REMOTE != '1'.",
+      "vibe_podcast/exporters.py:108-109 (episodes_to_rss_xml) uses xml.sax.saxutils.escape, which does not strip XML 1.0 illegal ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F) if present in episode title or summary.",
+      "vibe_podcast/show_memory.py:67,110 (load_show_bible, load_recent_episodes_memory) reads show_bible.json and episode timeline.json without checking .is_symlink() or is_relative_to containment, unlike episodes.py:_load_all_timelines.",
+      "vibe_podcast/interview.py:172-173 (register_custom_preset) inserts into in-memory INTERVIEW_PRESETS before _save_persisted_custom_presets() succeeds, leaving in-memory state mutated if disk persistence fails.",
+      "vibe_podcast/synthesizer.py:194 (_finalize_synthesis) writes timeline.json via write_text rather than atomic mkstemp + os.replace, and concurrent resynthesize_turn calls for the same episode_id are not serialized by a per-episode lock.",
+      "vibe_podcast/server.py:109-115 (_resolve_report_path) catches PermissionError and FileNotFoundError but not ValueError (e.g., embedded null byte in report_path causing an unhandled 500 instead of 400)."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Froutes%2F%23Filesystem%20containment%20and%20exports::vibe_podcast%2Fconnectors.py%23MarkdownDirConnector%20and%20episodes._resolve_episode_dir::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Resource%20and%20file%20handling",
+    "canonical_refs": {
+      "surface": "vibe_podcast/routes/#Filesystem containment and exports",
+      "boundary": "vibe_podcast/connectors.py#MarkdownDirConnector and episodes._resolve_episode_dir",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "ATTACK-CLASSES.md#Resource and file handling"
+    },
+    "surface": "REPORTS_DIR traversal, EPISODES_DIR read/write/delete, ShowBible/preset files, uploads & exports",
+    "boundary": "Path traversal, symlink rejection, atomic persistence, upload extraction & XML/SRT exports",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Resource/file handling, symlink/path traversal & temporary files",
+    "starting_paths": [
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/exporters.py",
+      "vibe_podcast/show_memory.py",
+      "vibe_podcast/interview.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Resource and file handling",
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#File descriptor, handle, and temporary-resource leaks",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-files-ssrf",
+    "reviewed_paths": [
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/exporters.py",
+      "vibe_podcast/interview.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/show_memory.py",
+      "vibe_podcast/synthesizer.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/server.py"
+        ],
+        "invariant": "MarkdownDirConnector.list_items and load_text contain reads within REPORTS_DIR, reject symlinks across path components, and require .md files",
+        "method": "source",
+        "result": "Confirmed in source: list_items walks with followlinks=False and skips symlinked dirs/files; load_text rejects symlinks on raw_path and every relative path component, resolves candidate, and enforces candidate.is_relative_to(allowed_root) and .md suffix.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "EPISODES_DIR read, audio streaming, turn re-synthesis, and delete routes enforce episode_id allowlist, reject symlinks, and verify parent/root containment",
+        "method": "source",
+        "result": "Confirmed in source: _resolve_episode_dir validates _EPISODE_ID_RE (^[a-zA-Z0-9_-]+$), rejects symlinked episode dirs, and verifies ep_dir.parent == root_dir; _load_episode_timeline, _load_all_timelines, and get_episode_audio re-check symlinks and is_relative_to containment.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/exporters.py",
+          "vibe_podcast/routes/episodes.py"
+        ],
+        "invariant": "SRT, Markdown Show Notes, and RSS 2.0 XML exports prevent cue/XML/attribute/header injection",
+        "method": "source",
+        "result": "Confirmed in source: timeline_to_srt strips CR/LF in speaker and text lines and clamps finite non-negative timestamps; episodes_to_rss_xml escapes text with xml_escape and attributes with _xml_attr plus quote(); Content-Disposition filenames use _EPISODE_ID_RE-validated episode_id.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/show_memory.py",
+          "vibe_podcast/interview.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py"
+        ],
+        "invariant": "ShowBible and custom preset persistence enforce ID/count limits, lock shared state, and write atomically via mkstemp + os.replace",
+        "method": "source",
+        "result": "Confirmed in source: save_show_bible and _save_persisted_custom_presets write via tempfile.mkstemp in target directory and os.replace with unlink cleanup on failure; CustomPresetPayload.id enforces ^[a-zA-Z0-9_-]+$ and register_custom_preset blocks built-in IDs and caps custom presets at 50 under _PRESETS_LOCK.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-files-ssrf",
+        "reviewed_paths": [
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/audio_fx.py"
+        ],
+        "invariant": "Upload extraction and audio trimming clean up temporary files and directories on both success and failure paths",
+        "method": "source",
+        "result": "Confirmed in source: upload_source_file never writes user filenames to disk and unlinks mkstemp PDF in finally; merge_turns_to_mp3 uses tempfile.TemporaryDirectory context manager; macOS say fallback unlinks temporary .aiff in finally.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/preflight.py:141 (_probe_http_ok on VIBEVOICE_REMOTE_URL) uses bare urllib.request.urlopen without _validate_public_url or redirect/DNS-pinning guards when VIBEPODCAST_ALLOW_PRIVATE_REMOTE != '1'.",
+      "vibe_podcast/exporters.py:108-109 (episodes_to_rss_xml) uses xml.sax.saxutils.escape, which does not strip XML 1.0 illegal ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F) if present in episode title or summary.",
+      "vibe_podcast/show_memory.py:67,110 (load_show_bible, load_recent_episodes_memory) reads show_bible.json and episode timeline.json without checking .is_symlink() or is_relative_to containment, unlike episodes.py:_load_all_timelines.",
+      "vibe_podcast/interview.py:172-173 (register_custom_preset) inserts into in-memory INTERVIEW_PRESETS before _save_persisted_custom_presets() succeeds, leaving in-memory state mutated if disk persistence fails.",
+      "vibe_podcast/synthesizer.py:194 (_finalize_synthesis) writes timeline.json via write_text rather than atomic mkstemp + os.replace, and concurrent resynthesize_turn calls for the same episode_id are not serialized by a per-episode lock.",
+      "vibe_podcast/server.py:109-115 (_resolve_report_path) catches PermissionError and FileNotFoundError but not ValueError (e.g., embedded null byte in report_path causing an unhandled 500 instead of 400)."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Froutes%2Fstudio.py%23Generation%20and%20upload%20resource%20limits::vibe_podcast%2Fserver.py%23_GENERATION_SEMAPHORE%20and%20schemas.py%20limits::profile%2Fquick%2Fall-in-scope-subsystems::RESOURCE-EXHAUSTION-AND-AVAILABILITY.md%23Unbounded%20buffering%20and%20cardinality",
+    "canonical_refs": {
+      "surface": "vibe_podcast/routes/studio.py#Generation and upload resource limits",
+      "boundary": "vibe_podcast/server.py#_GENERATION_SEMAPHORE and schemas.py limits",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality"
+    },
+    "surface": "Upload base64/PDF parsing, PodcastScript synthesis, MarkdownDirConnector read_text & generation concurrency",
+    "boundary": "Buffer/list cardinality limits, PDF/regex superlinear costs, worker starvation & request cancellation",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Unbounded payloads/reads, regex/PDF CPU amplification & semaphore/worker starvation",
+    "starting_paths": [
+      "vibe_podcast/server.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/synthesizer.py",
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/guardrails.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Detached work after cancellation",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Database and downstream query amplification",
+        "reason": "No SQL/NoSQL database engine exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-dos-supply",
+    "reviewed_paths": [
+      ".env.example",
+      "README.md",
+      "deploy/cloudflared.config.yml.example",
+      "scripts/serve_studio.sh",
+      "tests/test_security.py",
+      "vibe_podcast/audio_fx.py",
+      "vibe_podcast/auth.py",
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/guardrails.py",
+      "vibe_podcast/preflight.py",
+      "vibe_podcast/routes/__init__.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/scriptwriter.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/synthesizer.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/synthesizer.py",
+          "vibe_podcast/audio_fx.py"
+        ],
+        "invariant": "All script synthesis inputs (API payloads and LLM-generated scripts) enforce turn count, turn text length, and synthesis deadline bounds.",
+        "method": "source",
+        "result": "Failed: PodcastScript.turns and DialogueTurn.text lack max_length bounds (unlike GenerateRequest.target_turns<=40 and ResynthesizeTurnRequest.text<=2000), GenerateRequest.focus_questions lacks list/element limits, and _synthesize_edge_dialogue has no per-call asyncio.wait_for or total synthesis deadline.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/server.py",
+          "vibe_podcast/routes/studio.py"
+        ],
+        "invariant": "_GENERATION_SEMAPHORE slots are always released on client disconnect/error and cancelled generation requests stop background work.",
+        "method": "source",
+        "result": "Failed: generate_episode_stream acquires _GENERATION_SEMAPHORE before StreamingResponse iteration starts, leaking the slot permanently if aborted before _event_stream() runs, and _worker runs inside un-cancellable asyncio.to_thread after SSE disconnect.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/guardrails.py"
+        ],
+        "invariant": "URL fetching and text guardrails enforce linear regex matching and total wall-clock read deadlines.",
+        "method": "source",
+        "result": "guardrails.py regexes are linear; _http_get_bytes enforces max_bytes=512_000, but only checks deadline before opener.open() and performs blocking resp.read(max_bytes) where urllib timeout applies per socket recv(), enabling slow-trickle starvation of _GENERATION_SEMAPHORE.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-dos-supply",
+        "reviewed_paths": [
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "Remote VibeVoice WAV downloads enforce a maximum response byte limit before buffering into RAM and disk.",
+        "method": "source",
+        "result": "Failed: _synthesize_vibevoice_remote calls resp.read() into memory and writes podcast.wav with no max_bytes limit.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-06",
+        "reviewed_paths": [
+          "deploy/cloudflared.config.yml.example",
+          "scripts/serve_studio.sh",
+          "vibe_podcast/audio_fx.py",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/guardrails.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/schemas.py:SynthesizeScriptRequest-PodcastScript-unbounded-turns-text",
+        "method": "source",
+        "result": "[needs_validation] Source re-verification confirmed all cited files, lines, and missing bounds (with trim_edge_silence spawning up to 4 ffprobe/ffmpeg processes per turn plus 1 probe_duration_sec in merge_turns_to_mp3, and target_turns only used as a prompt hint before PodcastScript.model_validate). Execution blocked on Darwin host sandbox; kept needs_validation with corrected trace/evidence and bounded local/deployment plans.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-07",
+        "reviewed_paths": [
+          "deploy/cloudflared.config.yml.example",
+          "scripts/serve_studio.sh",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/routes/__init__.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/routes/studio.py:generate_episode_stream-semaphore-leak-and-detached-worker",
+        "method": "source",
+        "result": "[needs_validation] Source re-verification (method: source) confirms exact line numbers and control flow in studio.py:362-415 and server.py:55,167-176; admin auth is required per auth.py:179-197; execution is blocked by host nested-sandbox unavailability, so needs_validation is retained with exact local and owner-observed plans.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-08",
+        "reviewed_paths": [
+          "deploy/cloudflared.config.yml.example",
+          "scripts/serve_studio.sh",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/server.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/connectors.py:_http_get_bytes-per-recv-timeout-slowloris-starvation",
+        "method": "source",
+        "result": "[needs_validation] Source-verified all trace and evidence paths/lines; host execution blocker retains needs_validation with corrected HTTP entrypoint trace and exact local loopback fixture plan.",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-09",
+        "reviewed_paths": [
+          ".env.example",
+          "README.md",
+          "deploy/cloudflared.config.yml.example",
+          "scripts/serve_studio.sh",
+          "tests/test_security.py",
+          "vibe_podcast/audio_fx.py",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/preflight.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/synthesizer.py:_synthesize_vibevoice_remote-unbounded-response-read",
+        "method": "source",
+        "result": "[needs_validation] Source-verified (_synthesize_vibevoice_remote at vibe_podcast/synthesizer.py:426-427 indeed calls resp.read() unbounded into memory and writes podcast.wav while _GENERATION_SEMAPHORE is held; corrected trace/evidence line numbers from 426 to 427 for write_bytes(resp.read()) and added studio route + semaphore context). Kept needs_validation due to host sandbox blocker and unknown deployment topology/trust for VIBEVOICE_REMOTE_URL.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vibe_podcast/schemas.py:SynthesizeScriptRequest-PodcastScript-unbounded-turns-text",
+      "vibe_podcast/routes/studio.py:generate_episode_stream-semaphore-leak-and-detached-worker",
+      "vibe_podcast/connectors.py:_http_get_bytes-per-recv-timeout-slowloris-starvation",
+      "vibe_podcast/synthesizer.py:_synthesize_vibevoice_remote-unbounded-response-read"
+    ],
+    "unresolved": [],
+    "hardening_notes": [
+      "In .github/workflows/ci.yml, pin actions/checkout and astral-sh/setup-uv to full commit SHAs, add explicit `permissions: contents: read`, and run `uv sync --locked --extra dev` (and `uv run --frozen --no-sync` in scripts/serve_studio.sh) to prevent lockfile drift.",
+      "In vibe_podcast/routes/studio.py (_synthesize_from_request) and vibe_podcast/routes/episodes.py (update_episode_turn), catch subprocess.CalledProcessError and subprocess.TimeoutExpired from audio_fx.py so ffmpeg/ffprobe failures return structured HTTP 502/504 errors instead of unhandled 500s; additionally serialize per-episode edits in resynthesize_turn/delete_episode and write timeline.json atomically via tempfile + os.replace to prevent same-admin concurrent corruption.",
+      "In vibe_podcast/connectors.py (MarkdownDirConnector.load_text) and vibe_podcast/show_memory.py (ShowBible), enforce explicit read/item byte caps (e.g., capping .md reads and ShowBible callback/cliche string lengths before writing show_bible.json) to prevent oversized local files from consuming RAM prior to truncation.",
+      "In vibe_podcast/routes/episodes.py (_load_all_timelines), cache parsed episode metadata by directory mtime or paginate /api/episodes so repeated listener/RSS polling does not re-parse every timeline.json on every request."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fscriptwriter.py%23Untrusted%20content%20to%20LLM::vibe_podcast%2Fscriptwriter.py%23_wrap_untrusted_xml%20and%20guardrails::profile%2Fquick%2Fall-in-scope-subsystems::AI-AND-LLM.md%23Indirect%20injection%20through%20retrieved%20or%20ingested%20content",
+    "canonical_refs": {
+      "surface": "vibe_podcast/scriptwriter.py#Untrusted content to LLM",
+      "boundary": "vibe_podcast/scriptwriter.py#_wrap_untrusted_xml and guardrails",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "AI-AND-LLM.md#Indirect injection through retrieved or ingested content"
+    },
+    "surface": "Uploaded/fetched/manual source text & Map-Reduce chunks passed into agy/Ollama prompts",
+    "boundary": "Prompt delimiter isolation, injection/safety guardrails & agy CLI execution boundary",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Indirect prompt injection, role/provenance confusion & context extraction",
+    "starting_paths": [
+      "vibe_podcast/scriptwriter.py",
+      "vibe_podcast/guardrails.py",
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/routes/studio.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Chained vulnerabilities and trust boundaries",
+    "selected_companion_blocks": [
+      "AI-AND-LLM.md#Core discipline",
+      "AI-AND-LLM.md#Indirect injection through retrieved or ingested content",
+      "AI-AND-LLM.md#Prompt role and provenance confusion",
+      "AI-AND-LLM.md#Sensitive context extraction",
+      "AI-AND-LLM.md#Universal moves",
+      "AI-AND-LLM.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      },
+      {
+        "block": "AI-AND-LLM.md#MCP and sub-agent trust classes",
+        "reason": "Target does not expose or connect to MCP servers or sub-agent delegation loops"
+      },
+      {
+        "block": "AI-AND-LLM.md#Tool-argument injection into a downstream sink",
+        "reason": "LLM outputs PodcastScript JSON only and agy runs with --disable-slash-commands and no tool dispatcher"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-ai-llm",
+    "reviewed_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/guardrails.py",
+      "vibe_podcast/preflight.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/scriptwriter.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/show_memory.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-ai-llm",
+        "reviewed_paths": [
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/guardrails.py"
+        ],
+        "invariant": "Untrusted source_text and Map-Reduce chunks are isolated with unpredictable XML delimiters and never escape delimiter boundaries via user-supplied tags",
+        "method": "source",
+        "result": "_wrap_untrusted_xml (vibe_podcast/scriptwriter.py:94-98) generates a 64-bit random suffix via secrets.token_hex(8) and strips matching <tag_prefix...> / </tag_prefix...> tags case-insensitively in both summarize_long_source (chunk_document_*, lines 378-385) and _build_prompt (source_document_*, lines 182, 238-240). Admin-supplied host_a, host_b, guest_name, and focus_questions undergo check_text_safety, check_prompt_injection, and newline collapsing (_clean_inline) before prompt assembly (lines 161-178, 420-426).",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-ai-llm",
+        "reviewed_paths": [
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/server.py"
+        ],
+        "invariant": "Indirect prompt injection in ingested external URL/HN/PDF content cannot invoke host-level CLI tools or access sensitive local context via the agy execution boundary",
+        "method": "source",
+        "result": "Unvalidated external content from WebUrlConnector.load_url (vibe_podcast/connectors.py:364-443) or uploaded files (/api/upload-source in vibe_podcast/routes/studio.py:182-289) flows through _resolve_generate_source (vibe_podcast/server.py:118-139) and generate_podcast_script (vibe_podcast/scriptwriter.py:397-465) into _call_agy_cli (lines 255-270), which executes [agy_bin, '-p', prompt, '--disable-slash-commands', '--model', chosen_model] inheriting server CWD and environment without any tool-disabling or sandbox flags. External agy CLI tool behavior in headless -p mode is unobservable in repo source (needs_validation).",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-01",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/guardrails.py",
+          "vibe_podcast/preflight.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/show_memory.py"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/scriptwriter.py:_call_agy_cli:unrestricted-cli-tools-with-untrusted-source",
+        "method": "source",
+        "result": "[needs_validation] Source re-verified all cited files, functions, and line numbers (method: source). Confirmed _call_agy_cli passes only --disable-slash-commands with inherited cwd/env on untrusted URL/upload content; retained needs_validation because external agy CLI headless tool behavior is outside repo source and nested sandbox execution is blocked on this host.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vibe_podcast/scriptwriter.py:_call_agy_cli:unrestricted-cli-tools-with-untrusted-source"
+    ],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/guardrails.py:59-74: check_prompt_injection checks </?\\s*source_document but not </?\\s*chunk_document (used by summarize_long_source in vibe_podcast/scriptwriter.py:378), and relies on four static regex patterns on admin-supplied fields; however, _wrap_untrusted_xml strips <chunk_document*> tags in the Map stage and admin fields already carry admin authority.",
+      "vibe_podcast/exporters.py:92-127: episodes_to_rss_xml escapes XML syntax with xml_escape and _xml_attr, but does not strip XML 1.0 disallowed ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F) if present in persisted title/summary fields, which could cause strict XML parsers to reject /feed.xml.",
+      "vibe_podcast/show_memory.py:30-45: ShowBible.recurring_callbacks and banned_cliches validate list item count (max_length=12 and 20) without per-item character limits in Pydantic validation, though build_continuity_context truncates individual items to 80 and 60 characters when building prompts."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fscriptwriter.py%23extract_json::vibe_podcast%2Fscriptwriter.py%23extract_json%20regex%20and%20JSONDecoder.raw_decode%20loop::profile%2Fquick%2Fall-in-scope-subsystems::RESOURCE-EXHAUSTION-AND-AVAILABILITY.md%23Superlinear%20parsing%2C%20matching%2C%20or%20evaluation",
+    "canonical_refs": {
+      "surface": "vibe_podcast/scriptwriter.py#extract_json",
+      "boundary": "vibe_podcast/scriptwriter.py#extract_json regex and JSONDecoder.raw_decode loop",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation"
+    },
+    "surface": "LLM output JSON fence regex and brace-scanning raw_decode parser (vibe_podcast/scriptwriter.py#extract_json)",
+    "boundary": "extract_json ReDoS / O(N^2) raw_decode loop while holding _GENERATION_SEMAPHORE",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Superlinear parsing, matching, or evaluation",
+    "starting_paths": [
+      "vibe_podcast/scriptwriter.py"
+    ],
+    "ordinary_attack_class_block": null,
+    "selected_companion_blocks": [
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+      "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Database and downstream query amplification",
+        "reason": "extract_json operates purely on in-memory LLM response strings with no database queries"
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+        "reason": "extract_json parses plain-text/JSON strings rather than compressed archives or encoded streams"
+      },
+      {
+        "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+        "reason": "extract_json is only reachable after admin authentication on /api/script, /api/generate, or /api/generate/stream"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "deferred",
+    "agent_id": null,
+    "reviewed_paths": [],
+    "local_checks": [],
+    "result_fingerprints": [],
+    "unresolved": [
+      "quick_profile_final_critic: vibe_podcast/scriptwriter.py was omitted from Unit 7/availability starting_paths; extract_json regex and raw_decode loop deferred per quick profile single-wave stop."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fserver.py%23HTTP%20proxy%20headers%20and%20caching::vibe_podcast%2Froutes%2Fepisodes.py%23_resolve_public_base_url::profile%2Fquick%2Fall-in-scope-subsystems::WEB-PROTOCOL-AND-AUTH.md%23Host%20and%20forwarded-header%20trust",
+    "canonical_refs": {
+      "surface": "vibe_podcast/server.py#HTTP proxy headers and caching",
+      "boundary": "vibe_podcast/routes/episodes.py#_resolve_public_base_url",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust"
+    },
+    "surface": "Forwarded Host/Proto headers, /api/rss-url, /feed.xml, static files & response headers",
+    "boundary": "Reverse-proxy header trust, response-header safety & private-response caching",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Host/forwarded-header trust, response-header safety & cache/CORS boundary",
+    "starting_paths": [
+      "vibe_podcast/server.py",
+      "vibe_podcast/auth.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "scripts/serve_studio.sh"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Feature abuse and data leakage",
+    "selected_companion_blocks": [
+      "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+      "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+      "WEB-PROTOCOL-AND-AUTH.md#Response-header injection",
+      "WEB-PROTOCOL-AND-AUTH.md#Cache deception and private-response caching",
+      "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+      "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-http-auth",
+    "reviewed_paths": [
+      "scripts/serve_studio.sh",
+      "vibe_podcast/auth.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/server.py"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/auth.py",
+          "scripts/serve_studio.sh"
+        ],
+        "invariant": "Host and X-Forwarded-* headers cannot be abused across principals to poison cached responses, redirect targets, or cookie security.",
+        "method": "source",
+        "result": "serve_studio.sh sets --proxy-headers --forwarded-allow-ips=127.0.0.1, though _resolve_public_base_url (episodes.py:192-199) and _is_https_request (auth.py:130) read raw x-forwarded-proto/x-forwarded-host headers directly when VIBEPODCAST_PUBLIC_URL is unset. Spoofing X-Forwarded-Proto: https only upgrades Secure=True (cannot downgrade to false). _resolve_public_base_url only feeds authenticated /api/rss-url and /feed.xml responses that carry Cache-Control: no-store and validate host via _HOST_HEADER_RE, preventing cross-user cache poisoning or XML injection in source.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/server.py"
+        ],
+        "invariant": "Response headers (Location, Set-Cookie, Content-Disposition, CSP) are free of untrusted control-character or attribute injection.",
+        "method": "source",
+        "result": "RedirectResponse on GET /?token= uses static url='/'; Set-Cookie value is accepted only after exact hmac.compare_digest match against configured/generated tokens; Content-Disposition filenames on /srt and /shownotes require _EPISODE_ID_RE (^[a-zA-Z0-9_-]+$); apply_security_headers sets fixed X-Content-Type-Options, X-Frame-Options, Referrer-Policy, and CSP values.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-http-auth",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/routes/episodes.py"
+        ],
+        "invariant": "Dynamic API, RSS, and app-shell responses prevent shared caching of private content.",
+        "method": "source",
+        "result": "handle_security_and_auth sets Cache-Control: no-store on /, /index.html, /app.js, /style.css, /feed.xml, /js/*, and /api/* for responses returned by call_next (note: early-return 302 on GET /?token= and 401/403 auth errors omit Cache-Control: no-store).",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/auth.py:82-93 (_match_token_role): Encode candidate and expected tokens to UTF-8 bytes before calling hmac.compare_digest; passing a non-ASCII str (e.g., UTF-8 query param or Latin-1 decoded header) raises TypeError (HTTP 500) and skips apply_security_headers.",
+      "vibe_podcast/auth.py:160-177 (handle_security_and_auth): GET /?token=<LISTEN_TOKEN> is a state-changing top-level GET without CSRF protection; an invited listener who knows LISTEN_TOKEN can navigate an admin to /?token=<LISTEN_TOKEN> and downgrade the admin's vp_session cookie to listener (Login CSRF). Exchange tokens via POST /api/login (JSON body) with explicit opaque session IDs and rotation/logout support.",
+      "vibe_podcast/auth.py:163-197: Add Cache-Control: no-store to early-return responses (especially the 302 Set-Cookie redirect on GET /?token= and 401/403 responses) rather than only call_next() responses.",
+      "vibe_podcast/routes/episodes.py:187-200 (_resolve_public_base_url) & vibe_podcast/auth.py:128-138 (_is_https_request): Read request.url.scheme/netloc (populated by uvicorn --proxy-headers --forwarded-allow-ips) or validate Host/X-Forwarded-Host against an explicit allowlist when VIBEPODCAST_PUBLIC_URL is unset, instead of reading raw X-Forwarded-Proto/X-Forwarded-Host headers directly.",
+      "vibe_podcast/routes/episodes.py:101-104 (get_episode_timeline): Listener-accessible /api/episodes/{id}/timeline returns full SynthesisResult including server-side absolute filesystem paths (audio_path, timeline_path); consider stripping or relativizing internal paths in listener responses."
+    ]
+  },
+  {
+    "coverage_id": "vibe_podcast%2Fshow_memory.py%23Persistent%20memory%20and%20LLM%20outputs::vibe_podcast%2Fshow_memory.py%23_sanitize_memory_text%20and%20interview._load_custom_presets::profile%2Fquick%2Fall-in-scope-subsystems::AI-AND-LLM.md%23Persistent%20memory%20poisoning",
+    "canonical_refs": {
+      "surface": "vibe_podcast/show_memory.py#Persistent memory and LLM outputs",
+      "boundary": "vibe_podcast/show_memory.py#_sanitize_memory_text and interview._load_custom_presets",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "AI-AND-LLM.md#Persistent memory poisoning"
+    },
+    "surface": "ShowBible, recent timeline.json continuity, custom presets & PodcastScript outputs",
+    "boundary": "Persistent cross-episode memory sanitization, preset loading & LLM-to-UI/TTS/RSS rendering",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Persistent memory poisoning, cross-session bleed & insecure output rendering",
+    "starting_paths": [
+      "vibe_podcast/show_memory.py",
+      "vibe_podcast/interview.py",
+      "vibe_podcast/guardrails.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/exporters.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+    "selected_companion_blocks": [
+      "AI-AND-LLM.md#Core discipline",
+      "AI-AND-LLM.md#Persistent memory poisoning",
+      "AI-AND-LLM.md#Cross-session or cross-tenant context bleed",
+      "AI-AND-LLM.md#Insecure output rendering",
+      "AI-AND-LLM.md#Universal moves",
+      "AI-AND-LLM.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "candidate",
+    "agent_id": "hunter-ai-llm",
+    "reviewed_paths": [
+      "vibe_podcast/connectors.py",
+      "vibe_podcast/exporters.py",
+      "vibe_podcast/guardrails.py",
+      "vibe_podcast/interview.py",
+      "vibe_podcast/routes/episodes.py",
+      "vibe_podcast/routes/studio.py",
+      "vibe_podcast/schemas.py",
+      "vibe_podcast/scriptwriter.py",
+      "vibe_podcast/server.py",
+      "vibe_podcast/show_memory.py",
+      "vibe_podcast/synthesizer.py",
+      "web/app.js",
+      "web/js/generator.js",
+      "web/js/transcript.js"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-ai-llm",
+        "reviewed_paths": [
+          "vibe_podcast/show_memory.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/guardrails.py",
+          "vibe_podcast/synthesizer.py"
+        ],
+        "invariant": "LLM outputs persisted to timeline.json from untrusted sources cannot bypass prompt-injection checks or untrusted-delimiter isolation when reloaded as cross-episode continuity memory",
+        "method": "source",
+        "result": "enforce_script_guardrails (vibe_podcast/guardrails.py:97-133) only enforces check_text_safety (slur filter) on LLM-generated PodcastScript fields before _finalize_synthesis writes timeline.json (vibe_podcast/synthesizer.py:175-195). On subsequent generations (enable_show_memory=True by default), load_recent_episodes_memory and build_continuity_context (vibe_podcast/show_memory.py:95-233) sanitize title/summary/guest_name/takeaway only with _sanitize_memory_text (regex stripping <[^>]*> and newlines, lines 59-62) and _build_prompt injects continuity_block outside <source_document_*> in the trusted prompt preamble (vibe_podcast/scriptwriter.py:184, 196, 238-240).",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-ai-llm",
+        "reviewed_paths": [
+          "vibe_podcast/interview.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/guardrails.py"
+        ],
+        "invariant": "Custom preset imports and ShowBible updates require admin authority, cannot overwrite built-in presets, and pass safety/injection checks",
+        "method": "source",
+        "result": "POST /api/presets/import and PUT /api/show-bible (vibe_podcast/routes/studio.py:74-165) require admin auth (enforced by auth middleware), run check_text_safety and check_prompt_injection on all string fields, and register_custom_preset (vibe_podcast/interview.py:164-174) blocks BUILTIN_PRESET_IDS overwrites and caps custom presets at 50.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-ai-llm",
+        "reviewed_paths": [
+          "vibe_podcast/exporters.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/synthesizer.py",
+          "web/app.js",
+          "web/js/generator.js",
+          "web/js/transcript.js"
+        ],
+        "invariant": "PodcastScript and SynthesisResult outputs are properly encoded/sanitized before UI DOM, SRT, Markdown Show Notes, RSS XML, and TTS sinks",
+        "method": "source",
+        "result": "Browser UI renders LLM/episode fields via textContent or escapeHtml (web/app.js:290-296, 381-389; web/js/transcript.js:44-46, 70, 80-96); exporters.py escapes XML elements/attributes via xml_escape and _xml_attr (lines 19-20, 99-114) and strips CR/LF in SRT cues (lines 31-46); Show Notes download as text/markdown attachment; macOS say fallback uses shell=False list with '--' end-of-options (vibe_podcast/synthesizer.py:141-145).",
+        "artifact": null
+      },
+      {
+        "agent_id": "verifier-02",
+        "reviewed_paths": [
+          "vibe_podcast/connectors.py",
+          "vibe_podcast/exporters.py",
+          "vibe_podcast/guardrails.py",
+          "vibe_podcast/interview.py",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/routes/studio.py",
+          "vibe_podcast/schemas.py",
+          "vibe_podcast/scriptwriter.py",
+          "vibe_podcast/server.py",
+          "vibe_podcast/show_memory.py",
+          "vibe_podcast/synthesizer.py",
+          "web/app.js",
+          "web/js/transcript.js"
+        ],
+        "invariant": "Independent Phase 3+5 verification of candidate vibe_podcast/show_memory.py:load_recent_episodes_memory:untrusted-timeline-to-trusted-prompt-memory",
+        "method": "source",
+        "result": "[needs_validation] Source-verified all trace and evidence paths/lines in read-only mode; execution blocked by host nested-sandbox unavailability and live LLM inference requirement, so needs_validation stands with preserved fingerprint.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [
+      "vibe_podcast/show_memory.py:load_recent_episodes_memory:untrusted-timeline-to-trusted-prompt-memory"
+    ],
+    "unresolved": [],
+    "hardening_notes": [
+      "vibe_podcast/guardrails.py:59-74: check_prompt_injection checks </?\\s*source_document but not </?\\s*chunk_document (used by summarize_long_source in vibe_podcast/scriptwriter.py:378), and relies on four static regex patterns on admin-supplied fields; however, _wrap_untrusted_xml strips <chunk_document*> tags in the Map stage and admin fields already carry admin authority.",
+      "vibe_podcast/exporters.py:92-127: episodes_to_rss_xml escapes XML syntax with xml_escape and _xml_attr, but does not strip XML 1.0 disallowed ASCII control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F) if present in persisted title/summary fields, which could cause strict XML parsers to reject /feed.xml.",
+      "vibe_podcast/show_memory.py:30-45: ShowBible.recurring_callbacks and banned_cliches validate list item count (max_length=12 and 20) without per-item character limits in Pydantic validation, though build_continuity_context truncates individual items to 80 and 60 characters when building prompts."
+    ]
+  },
+  {
+    "coverage_id": "web%2F%23Browser%20DOM%20and%20UI%20navigation::web%2Fjs%2Fstate.js%23escapeHtml%20and%20CSP%20headers::profile%2Fquick%2Fall-in-scope-subsystems::CLIENT-SIDE.md%23DOM-based%20XSS",
+    "canonical_refs": {
+      "surface": "web/#Browser DOM and UI navigation",
+      "boundary": "web/js/state.js#escapeHtml and CSP headers",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "CLIENT-SIDE.md#DOM-based XSS"
+    },
+    "surface": "Vanilla JS UI (web/index.html, web/app.js, web/js/{generator,transcript,player,state}.js)",
+    "boundary": "Browser HTML rendering, preset JSON import, URL/navigation sinks & clickjacking framing",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "DOM-based XSS, DOM clobbering, clickjacking & client-side navigation",
+    "starting_paths": [
+      "web/index.html",
+      "web/app.js",
+      "web/js/state.js",
+      "web/js/transcript.js",
+      "web/js/generator.js",
+      "web/js/player.js",
+      "web/js/api.js",
+      "vibe_podcast/auth.py"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+    "selected_companion_blocks": [
+      "CLIENT-SIDE.md#Core discipline",
+      "CLIENT-SIDE.md#DOM-based XSS",
+      "CLIENT-SIDE.md#DOM clobbering",
+      "CLIENT-SIDE.md#Client-side navigation confusion",
+      "CLIENT-SIDE.md#Clickjacking",
+      "CLIENT-SIDE.md#Universal moves",
+      "CLIENT-SIDE.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      },
+      {
+        "block": "CLIENT-SIDE.md#`postMessage` origin and source trust",
+        "reason": "No window.postMessage handlers exist in web/ JS"
+      },
+      {
+        "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+        "reason": "No service worker exists in web/"
+      },
+      {
+        "block": "CLIENT-SIDE.md#Cross-site WebSocket request use",
+        "reason": "No WebSocket client or server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-client-web",
+    "reviewed_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/locales/en-US.json",
+      "vibe_podcast/locales/zh-TW.json",
+      "vibe_podcast/routes/episodes.py",
+      "web/app.js",
+      "web/index.html",
+      "web/js/generator.js",
+      "web/js/player.js",
+      "web/js/state.js",
+      "web/js/transcript.js"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "web/js/state.js",
+          "web/js/transcript.js",
+          "web/js/generator.js",
+          "web/js/player.js",
+          "web/app.js",
+          "web/index.html",
+          "vibe_podcast/auth.py",
+          "vibe_podcast/locales/zh-TW.json",
+          "vibe_podcast/locales/en-US.json"
+        ],
+        "invariant": "DOM-based XSS: untrusted or server-returned strings must not reach HTML/script sinks unescaped, and CSP must block inline script execution.",
+        "method": "source",
+        "result": "All dynamic innerHTML insertions in web/js/transcript.js (renderTranscript lines 79-96, 105) and web/app.js (loadEpisodes lines 376-389) escape every interpolated value via escapeHtml() in web/js/state.js (lines 9-16) or fmtTime() (lines 18-23). Other UI updates in web/app.js, web/js/generator.js, and web/js/player.js use textContent, value, dataset, or Canvas 2D fillText. No location.search/hash, document.referrer, or window.name sources are read in web/ JS, and apply_security_headers() in vibe_podcast/auth.py (lines 146-149) sets Content-Security-Policy with default-src 'self'; script-src 'self'.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "web/js/transcript.js",
+          "web/js/generator.js",
+          "web/app.js",
+          "web/index.html"
+        ],
+        "invariant": "DOM clobbering: untrusted markup cannot inject id or name attributes that shadow globals or DOM lookups.",
+        "method": "source",
+        "result": "No unescaped HTML markup is parsed into the DOM: HTML template literals wrap dynamic fields in escapeHtml(), and elements created via document.createElement in renderFormatGrid (web/js/generator.js lines 81-91), loadReports (web/app.js lines 257-262), and applyMeta (web/app.js lines 137-146) set textContent/value/dataset without attacker-controlled id or name attributes.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "web/app.js",
+          "web/js/generator.js",
+          "web/index.html",
+          "vibe_podcast/routes/episodes.py",
+          "vibe_podcast/locales/zh-TW.json",
+          "vibe_podcast/locales/en-US.json"
+        ],
+        "invariant": "Client-side navigation confusion and reverse tabnabbing: navigation sinks must restrict schemes/paths and use noopener,noreferrer on external targets.",
+        "method": "source",
+        "result": "window.location.href assignments in web/app.js only target same-origin paths with encodeURIComponent() (line 237 for /?token= from window.prompt, and lines 316, 319 for /api/episodes/{encodedId}/srt|shownotes). window.open() in web/app.js (lines 496, 498) opens /feed.xml or /api/rss-url (validated http/https base URL from _resolve_public_base_url in vibe_podcast/routes/episodes.py lines 187-200) with '_blank' and 'noopener,noreferrer'. External link #credits-link (web/index.html line 106, web/app.js line 96) uses static https://github.com/microsoft/VibeVoice from locales/*.json with rel='noopener noreferrer'. Template download in web/js/generator.js (lines 361-367) uses a JSON Blob object URL.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "vibe_podcast/auth.py",
+          "web/index.html"
+        ],
+        "invariant": "Clickjacking: state-changing studio responses must enforce framing denial.",
+        "method": "source",
+        "result": "apply_security_headers() in vibe_podcast/auth.py (line 144) sets X-Frame-Options: DENY on all auth error, redirect, static UI, and API responses returned via handle_security_and_auth() (lines 173, 176, 192, 196, 206).",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening_notes": [
+      "Add frame-ancestors 'none' to Content-Security-Policy in vibe_podcast/auth.py (lines 146-149) for defense-in-depth alongside X-Frame-Options: DENY, and review whether style-src 'unsafe-inline' can be removed.",
+      "In web/js/state.js (line 4), initialize state.userRole to null or 'listener' instead of 'admin', and in web/app.js (lines 409-411), avoid calling setWorkspaceMode('studio', false) when state.userRole !== 'admin' and episodes.length === 0.",
+      "Clear or role-scope studio localStorage keys (e.g., vp_studio_prefs, vp_ui_mode) in web/app.js when applyMeta() observes state.userRole === 'listener'."
+    ]
+  },
+  {
+    "coverage_id": "web%2Fjs%2Fapi.js%23CORS%20and%20browser%20storage::vibe_podcast%2Fserver.py%23CORSMiddleware::profile%2Fquick%2Fall-in-scope-subsystems::CLIENT-SIDE.md%23Credentialed%20CORS%20trust",
+    "canonical_refs": {
+      "surface": "web/js/api.js#CORS and browser storage",
+      "boundary": "vibe_podcast/server.py#CORSMiddleware",
+      "subsystem": "profile/quick/all-in-scope-subsystems",
+      "attack_class": "CLIENT-SIDE.md#Credentialed CORS trust"
+    },
+    "surface": "Browser fetch credentials, localStorage state, role-conditional UI & CORS allowlist",
+    "boundary": "Cross-origin credentialed API requests and client-side storage isolation",
+    "subsystem": "All In-Scope Subsystems (quick profile)",
+    "attack_class": "Credentialed CORS trust and browser-storage disclosure",
+    "starting_paths": [
+      "vibe_podcast/server.py",
+      "vibe_podcast/auth.py",
+      "web/js/api.js",
+      "web/app.js",
+      "web/js/state.js",
+      "web/js/player.js"
+    ],
+    "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+    "selected_companion_blocks": [
+      "CLIENT-SIDE.md#Core discipline",
+      "CLIENT-SIDE.md#Credentialed CORS trust",
+      "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+      "CLIENT-SIDE.md#Cross-context storage and broadcast confusion",
+      "CLIENT-SIDE.md#Universal moves",
+      "CLIENT-SIDE.md#Validation rules"
+    ],
+    "excluded_blocks": [
+      {
+        "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+        "reason": "Target is pure Python 3.12 and browser JS with no custom native/unsafe C/C++/Rust parser code in repo"
+      },
+      {
+        "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+        "reason": "No gRPC, GraphQL, custom binary RPC, message broker, or pub/sub queue exists in source"
+      },
+      {
+        "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+        "reason": "No IAM, Terraform/IaC, containers, Kubernetes, or serverless handlers exist in repo beyond an example cloudflared YAML"
+      },
+      {
+        "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+        "reason": "Single-owner local studio architecture without multi-tenant data stores, object-link ACLs, or tenant backups"
+      },
+      {
+        "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+        "reason": "No native mobile/desktop wrapper, deep links, WebView bridge, or Unix/XPC/D-Bus IPC server exists in source"
+      }
+    ],
+    "prior_status": "none",
+    "attempts": [],
+    "wave": 1,
+    "status": "covered",
+    "agent_id": "hunter-client-web",
+    "reviewed_paths": [
+      "vibe_podcast/auth.py",
+      "vibe_podcast/server.py",
+      "web/app.js",
+      "web/js/api.js",
+      "web/js/player.js",
+      "web/js/state.js"
+    ],
+    "local_checks": [
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "vibe_podcast/server.py",
+          "vibe_podcast/auth.py",
+          "web/js/api.js",
+          "web/js/player.js"
+        ],
+        "invariant": "Credentialed CORS trust: CORSMiddleware with allow_credentials=True must not reflect arbitrary Origins, match weak patterns, or allow wildcard origins.",
+        "method": "source",
+        "result": "_build_allowed_origins() in vibe_podcast/server.py (lines 82-93) builds an exact-match list starting with http://127.0.0.1:8765 and http://localhost:8765 and adds only http:// or https:// strings from VIBEPODCAST_ALLOWED_ORIGINS and VIBEPODCAST_PUBLIC_URL (no wildcards, regexes, or dynamic Origin reflection). CORSMiddleware is registered outermost (lines 187-193) after @app.middleware('http'), and vp_session cookie uses HttpOnly and SameSite=Lax (vibe_podcast/auth.py lines 164-172). Client fetch calls in web/js/api.js and web/js/player.js (line 150) target relative same-origin URLs.",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "web/js/state.js",
+          "web/js/player.js",
+          "web/app.js",
+          "web/js/api.js",
+          "vibe_podcast/auth.py"
+        ],
+        "invariant": "Browser-storage disclosure and stale authorization: tokens, private data, and authoritative role decisions must not leak or persist in browser storage across privilege changes.",
+        "method": "source",
+        "result": "Session and listen tokens are held only in the HttpOnly vp_session cookie (vibe_podcast/auth.py lines 164-172), never written to localStorage or sessionStorage. localStorage keys in web/js/state.js (line 6), web/js/player.js (lines 424, 435, 445), and web/app.js (lines 312, 422, 435, 478, 502-548) store only UI language, playback position/speed, transcript font size, last episode ID, UI mode/sidebar collapse, and studio host/voice/model preferences. restoreStudioPrefs() and loadReports() are gated on state.userRole === 'admin' after applyMeta() sets state.userRole from server /api/meta (web/app.js lines 82-88, 648-651), and server middleware enforces _is_listener_allowed_api() on all /api/* requests (vibe_podcast/auth.py lines 194-197).",
+        "artifact": null
+      },
+      {
+        "agent_id": "hunter-client-web",
+        "reviewed_paths": [
+          "web/app.js",
+          "web/js/player.js",
+          "web/js/state.js",
+          "vibe_podcast/auth.py"
+        ],
+        "invariant": "Cross-context storage and broadcast confusion: tabs must not synchronize or overwrite authorization state via BroadcastChannel, storage events, or shared workers.",
+        "method": "source",
+        "result": "No BroadcastChannel, storage event listeners, SharedWorker, ServiceWorker, IndexedDB, or CacheStorage exist in web/. Each page load fetches /api/meta to resolve authoritative role from the HttpOnly vp_session cookie, and server-side RBAC in handle_security_and_auth() (vibe_podcast/auth.py lines 179-197) rejects listener cookies on admin API routes with 403 regardless of client state.",
+        "artifact": null
+      }
+    ],
+    "result_fingerprints": [],
+    "unresolved": [],
+    "hardening_notes": [
+      "Add frame-ancestors 'none' to Content-Security-Policy in vibe_podcast/auth.py (lines 146-149) for defense-in-depth alongside X-Frame-Options: DENY, and review whether style-src 'unsafe-inline' can be removed.",
+      "In web/js/state.js (line 4), initialize state.userRole to null or 'listener' instead of 'admin', and in web/app.js (lines 409-411), avoid calling setWorkspaceMode('studio', false) when state.userRole !== 'admin' and episodes.length === 0.",
+      "Clear or role-scope studio localStorage keys (e.g., vp_studio_prefs, vp_ui_mode) in web/app.js when applyMeta() observes state.userRole === 'listener'."
+    ]
+  }
+]
